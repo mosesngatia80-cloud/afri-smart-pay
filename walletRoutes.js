@@ -1,32 +1,31 @@
 const express = require("express");
-const { v4: uuidv4 } = require("uuid");
-
 const router = express.Router();
+const Wallet = require("../models/Wallet");
 
-// Temporary storage for wallets (for testing)
-let wallets = [];
-
-// Create wallet route
-router.post("/create-wallet", (req, res) => {
-  const { name } = req.body;
-
-  if (!name) {
-    return res.status(400).json({ message: "Please provide a name" });
+// 🪙 Create Wallet
+router.post("/create-wallet", async (req, res) => {
+  try {
+    const { name } = req.body;
+    const wallet = new Wallet({ name, balance: 0 });
+    await wallet.save();
+    res.json({
+      message: "Wallet created successfully!",
+      wallet,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Error creating wallet", error });
   }
-
-  const newWallet = {
-    id: uuidv4(),
-    name,
-    balance: 0,
-    createdAt: new Date(),
-  };
-
-  wallets.push(newWallet);
-  res.status(201).json({
-    message: "Wallet created successfully!",
-    wallet: newWallet,
-  });
 });
 
-// Export router
+// 🧾 Get Wallet by ID
+router.get("/:id", async (req, res) => {
+  try {
+    const wallet = await Wallet.findById(req.params.id);
+    if (!wallet) return res.status(404).json({ message: "Wallet not found" });
+    res.json(wallet);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error });
+  }
+});
+
 module.exports = router;
