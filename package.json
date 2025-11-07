@@ -1,14 +1,13 @@
 {
   "name": "afri-smart-pay",
   "version": "1.0.0",
-  "description": "Afri Smart Pay — a simple digital payment API for Africa.",
+  "description": "Afri Smart Pay API — Connecting Africa through smart payments!",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
- "dependencies": {
-  "uuid": "^9.0.1",
-  "express": "^4.18.2"
- } 
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.1"
   }
 }
