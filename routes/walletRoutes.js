@@ -1,69 +1,68 @@
 const express = require("express");
-const router = express.Router();
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
+const router = express.Router();
 
-// Path to wallet data file
-const DATA_FILE = "wallets.json";
+const WALLET_FILE = "./wallets.json";
 
-// Helper function to read wallets
-function readWallets() {
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, "[]");
-  }
-  const data = fs.readFileSync(DATA_FILE, "utf8");
-  return JSON.parse(data || "[]");
+// Helper: Load wallets
+function loadWallets() {
+  if (!fs.existsSync(WALLET_FILE)) return [];
+  const data = fs.readFileSync(WALLET_FILE);
+  return JSON.parse(data);
 }
 
-// Helper function to save wallets
+// Helper: Save wallets
 function saveWallets(wallets) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(wallets, null, 2));
+  fs.writeFileSync(WALLET_FILE, JSON.stringify(wallets, null, 2));
 }
 
-/* -----------------------------------
-   1️⃣ Create Wallet
------------------------------------ */
+// ✅ Create Wallet
 router.post("/create-wallet", (req, res) => {
   const { name } = req.body;
+  if (!name) return res.status(400).json({ message: "Name is required" });
 
-  if (!name) {
-    return res.status(400).json({ message: "Name is required" });
-  }
-
-  const wallets = readWallets();
-
-  const newWallet = {
-    id: uuidv4(),
-    name,
-    balance: 0,
-    createdAt: new Date().toISOString(),
-  };
-
+  const wallets = loadWallets();
+  const newWallet = { id: uuidv4(), name, balance: 0, createdAt: new Date() };
   wallets.push(newWallet);
   saveWallets(wallets);
 
-  res.json({
-    message: "Wallet created successfully!",
-    wallet: newWallet,
-  });
+  res.json({ message: "Wallet created successfully!", wallet: newWallet });
 });
 
-/* -----------------------------------
-   2️⃣ Get Wallet by ID
------------------------------------ */
+// 💰 Get Wallet by ID
 router.get("/wallet/:id", (req, res) => {
-  const walletId = req.params.id;
-  const wallets = readWallets();
+  const wallets = loadWallets();
+  const wallet = wallets.find((w) => w.id === req.params.id);
 
-  const wallet = wallets.find((w) => w.id === walletId);
+  if (!wallet) return res.status(404).json({ message: "Wallet not found!" });
+  res.json({ wallet });
+});
 
-  if (!wallet) {
-    return res.status(404).json({ message: "Wallet not found!" });
-  }
+// 🔄 Send Money Between Wallets
+router.post("/wallet/send", (req, res) => {
+  const { fromId, toId, amount } = req.body;
+  if (!fromId || !toId || !amount)
+    return res.status(400).json({ message: "fromId, toId, and amount are required" });
+
+  const wallets = loadWallets();
+  const sender = wallets.find((w) => w.id === fromId);
+  const receiver = wallets.find((w) => w.id === toId);
+
+  if (!sender || !receiver)
+    return res.status(404).json({ message: "One or both wallets not found" });
+
+  if (sender.balance < amount)
+    return res.status(400).json({ message: "Insufficient balance" });
+
+  sender.balance -= amount;
+  receiver.balance += amount;
+  saveWallets(wallets);
 
   res.json({
-    message: "Wallet found successfully!",
-    wallet,
+    message: "Transaction successful!",
+    from: { id: sender.id, balance: sender.balance },
+    to: { id: receiver.id, balance: receiver.balance },
   });
 });
 
