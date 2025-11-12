@@ -1,0 +1,16 @@
+{
+  "name": "afri-smart-pay",
+  "version": "1.0.0",
+  "description": "Afri Smart Pay 💳 — Connecting Africa through smart payments",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^4.19.2",
+    "uuid": "^9.0.1"
+  }
+}

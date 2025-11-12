@@ -1,0 +1,72 @@
+import express from "express";
+import bodyParser from "body-parser";
+import dotenv from "dotenv";
+import { v4 as uuidv4 } from "uuid";
+
+dotenv.config();
+const app = express();
+app.use(bodyParser.json());
+
+// In-memory wallet store
+let wallets = {};
+
+// ✅ Create wallet
+app.post("/api/create-wallet", (req, res) => {
+  const { walletId, owner } = req.body;
+  if (!walletId || !owner) {
+    return res.status(400).json({ message: "walletId and owner are required" });
+  }
+
+  if (wallets[walletId]) {
+    return res.status(400).json({ message: "Wallet already exists" });
+  }
+
+  wallets[walletId] = { owner, balance: 0, id: uuidv4() };
+  res.json({ message: "Wallet created successfully", walletId });
+});
+
+// ✅ Check balance
+app.get("/api/check-balance/:walletId", (req, res) => {
+  const { walletId } = req.params;
+  const wallet = wallets[walletId];
+
+  if (!wallet) {
+    return res.status(404).json({ message: "Wallet not found" });
+  }
+
+  res.json({
+    message: "Wallet balance retrieved successfully",
+    balance: wallet.balance,
+  });
+});
+
+// ✅ Top-up wallet
+app.post("/api/top-up", (req, res) => {
+  const { walletId, amount } = req.body;
+  if (!walletId || !amount) {
+    return res.status(400).json({ message: "walletId and amount are required" });
+  }
+
+  const wallet = wallets[walletId];
+  if (!wallet) {
+    return res.status(404).json({ message: "Wallet not found" });
+  }
+
+  wallet.balance += Number(amount);
+  res.json({
+    message: "Wallet topped up successfully",
+    walletId,
+    newBalance: wallet.balance,
+  });
+});
+
+// ✅ Root route
+app.get("/", (req, res) => {
+  res.send("Welcome to Afri Smart Pay API 💳 — Connecting Africa through smart payments!");
+});
+
+// ✅ Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
