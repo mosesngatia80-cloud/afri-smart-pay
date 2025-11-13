@@ -1,3 +1,4 @@
+
 const express = require('express');
 const bodyParser = require('body-parser');
 
@@ -31,16 +32,57 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Example route: create wallet
-app.post('/api/create-wallet', (req, res) => {
-  // Your wallet creation logic here
-  res.json({ status: 'success', data: req.body });
+// =====================
+// ROUTES
+// =====================
+
+// Homepage route
+app.get('/', (req, res) => {
+  res.send("Welcome to Afri Smart Pay API 💳 — Connecting Africa through smart payments!");
 });
 
-// Example route: send money
+// Create Wallet
+app.post('/api/create-wallet', (req, res) => {
+  const data = req.body;
+  res.json({
+    status: 'success',
+    message: 'Wallet created successfully',
+    data
+  });
+});
+
+// Check Balance
+app.get('/api/check-balance', (req, res) => {
+  const userId = req.query.userId;
+
+  res.json({
+    status: 'success',
+    userId,
+    balance: 0 // Placeholder value
+  });
+});
+
+// Top Up Wallet
+app.post('/api/top-up', (req, res) => {
+  const { userId, amount } = req.body;
+
+  res.json({
+    status: 'success',
+    message: 'Wallet topped up successfully',
+    userId,
+    newBalance: amount // Placeholder logic
+  });
+});
+
+// Send Money
 app.post('/api/send-money', (req, res) => {
-  // Your send money logic here
-  res.json({ status: 'success', data: req.body });
+  const { fromUser, toUser, amount } = req.body;
+
+  res.json({
+    status: 'success',
+    message: 'Transfer completed successfully',
+    transfer: { fromUser, toUser, amount }
+  });
 });
 
 // Start server
