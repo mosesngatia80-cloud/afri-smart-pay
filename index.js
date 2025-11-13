@@ -1,206 +1,149 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-
 const app = express();
-const PORT = process.env.PORT || 10000;
+app.use(express.json());
 
-// In-memory wallet & transaction store (temporary; replace with DB later)
-const wallets = {}; 
-const transactions = [];
+let wallets = {}; 
+let transactions = [];
+let txId = 1;
 
-// Middleware: safely parse JSON
-app.use(bodyParser.json({
-  strict: true,
-  verify: (req, res, buf) => {
-    try {
-      JSON.parse(buf);
-    } catch (e) {
-      throw new Error('INVALID_JSON');
-    }
-  }
-}));
+// Validate helper
+function validateString(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
 
-// Global error handler
-app.use((err, req, res, next) => {
-  if (err && err.message === 'INVALID_JSON') {
-    return res.status(400).json({
-      status: 'error',
-      message: 'Malformed JSON in request body'
-    });
-  }
-  console.error(err);
-  res.status(500).json({
-    status: 'error',
-    message: 'Internal Server Error'
-  });
-});
-
-// =====================
-// ROUTES
-// =====================
-
-// Homepage
-app.get('/', (req, res) => {
-  res.send("Welcome to Afri Smart Pay API 💳 — Connecting Africa through smart payments!");
-});
-
-// Create Wallet
+// Create wallet
 app.post('/api/create-wallet', (req, res) => {
   const { userId } = req.body;
-  if (!userId) return res.status(400).json({ status: 'error', message: 'userId is required' });
 
-  if (!wallets[userId]) {
-    wallets[userId] = { balance: 0 };
-    return res.json({
-      status: 'success',
-      message: 'Wallet created successfully',
-      userId,
-      balance: 0
-    });
+  if (!validateString(userId)) {
+    return res.status(400).json({ status: "error", message: "Invalid or missing userId" });
   }
 
-  return res.json({
-    status: 'success',
-    message: 'Wallet already exists',
-    userId,
-    balance: wallets[userId].balance
-  });
+  if (wallets[userId]) {
+    return res.status(400).json({ status: "error", message: "Wallet already exists" });
+  }
+
+  wallets[userId] = { balance: 0 };
+  return res.json({ status: "success", message: "Wallet created successfully", userId, balance: 0 });
 });
 
-// Check Balance
-app.get('/api/check-balance', (req, res) => {
-  const userId = req.query.userId;
-  if (!userId) {
-    return res.status(400).json({ status: 'error', message: 'userId query param required' });
-  }
-
-  const wallet = wallets[userId];
-  if (!wallet) {
-    return res.status(404).json({ status: 'error', message: 'Wallet not found', userId });
-  }
-
-  return res.json({
-    status: 'success',
-    userId,
-    balance: wallet.balance
-  });
-});
-
-// Top Up Wallet
+// Top-up
 app.post('/api/top-up', (req, res) => {
   const { userId, amount } = req.body;
 
-  if (!userId || amount == null) {
-    return res.status(400).json({ status: 'error', message: 'userId and amount required' });
+  if (!validateString(userId)) {
+    return res.status(400).json({ status: "error", message: "Invalid userId" });
   }
 
-  const num = Number(amount);
-  if (isNaN(num) || num <= 0) {
-    return res.status(400).json({ status: 'error', message: 'amount must be a positive number' });
+  if (typeof amount !== "number" || amount <= 0) {
+    return res.status(400).json({ status: "error", message: "Invalid amount" });
   }
 
-  if (!wallets[userId]) wallets[userId] = { balance: 0 };
-  wallets[userId].balance += num;
+  if (!wallets[userId]) {
+    return res.status(404).json({ status: "error", message: "Wallet not found" });
+  }
 
-  // record transaction
+  wallets[userId].balance += amount;
+
   transactions.push({
-    id: transactions.length + 1,
-    fromUser: 'SYSTEM',
+    id: txId++,
+    fromUser: "SYSTEM",
     toUser: userId,
-    amount: num,
-    time: new Date().toISOString(),
-    type: 'top-up'
+    amount,
+    time: new Date(),
+    type: "top-up"
   });
 
   return res.json({
-    status: 'success',
-    message: 'Wallet topped up successfully',
+    status: "success",
+    message: "Wallet topped up successfully",
     userId,
     newBalance: wallets[userId].balance
   });
 });
 
-// Send Money (wallet → wallet)
+// Send money
 app.post('/api/send-money', (req, res) => {
   const { fromUser, toUser, amount } = req.body;
 
-  if (!fromUser || !toUser || amount == null) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'fromUser, toUser, and amount are required'
-    });
+  if (!validateString(fromUser) || !validateString(toUser)) {
+    return res.status(400).json({ status: "error", message: "Invalid fromUser or toUser" });
   }
 
   if (fromUser === toUser) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'Cannot send money to the same account'
-    });
+    return res.status(400).json({ status: "error", message: "Sender and receiver cannot be the same" });
   }
 
-  const num = Number(amount);
-  if (isNaN(num) || num <= 0) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'amount must be a positive number'
-    });
+  if (typeof amount !== "number" || amount <= 0) {
+    return res.status(400).json({ status: "error", message: "Invalid amount" });
   }
 
-  if (!wallets[fromUser] || wallets[fromUser].balance < num) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'Insufficient balance or wallet not found',
-      fromUser
-    });
+  if (!wallets[fromUser] || !wallets[toUser]) {
+    return res.status(404).json({ status: "error", message: "One or both wallets not found" });
   }
 
-  // Perform transfer
-  wallets[fromUser].balance -= num;
-  if (!wallets[toUser]) wallets[toUser] = { balance: 0 };
-  wallets[toUser].balance += num;
+  if (wallets[fromUser].balance < amount) {
+    return res.status(400).json({ status: "error", message: "Insufficient balance" });
+  }
 
-  const tx = {
-    id: transactions.length + 1,
+  wallets[fromUser].balance -= amount;
+  wallets[toUser].balance += amount;
+
+  const transferRecord = {
+    id: txId++,
     fromUser,
     toUser,
-    amount: num,
-    time: new Date().toISOString(),
-    type: 'transfer'
+    amount,
+    time: new Date(),
+    type: "transfer"
   };
 
-  transactions.push(tx);
+  transactions.push(transferRecord);
 
   return res.json({
-    status: 'success',
-    message: 'Transfer completed successfully',
-    transfer: tx,
-    balances: {
-      [fromUser]: wallets[fromUser].balance,
-      [toUser]: wallets[toUser].balance
-    }
+    status: "success",
+    message: "Transfer completed successfully",
+    transfer: transferRecord
   });
 });
 
-// Transaction History
-app.get('/api/transaction-history', (req, res) => {
-  const userId = req.query.userId;
+// Check balance
+app.get('/api/check-balance', (req, res) => {
+  const { userId } = req.query;
 
-  if (!userId) {
-    return res.status(400).json({ status: 'error', message: 'userId query param required' });
+  if (!validateString(userId)) {
+    return res.status(400).json({ status: "error", message: "Invalid userId" });
   }
 
-  const userTx = transactions.filter(
-    t => t.fromUser === userId || t.toUser === userId
+  if (!wallets[userId]) {
+    return res.status(404).json({ status: "error", message: "Wallet not found" });
+  }
+
+  return res.json({
+    status: "success",
+    userId,
+    balance: wallets[userId].balance
+  });
+});
+
+// Transaction history
+app.get('/api/transaction-history', (req, res) => {
+  const { userId } = req.query;
+
+  if (!validateString(userId)) {
+    return res.status(400).json({ status: "error", message: "Invalid userId" });
+  }
+
+  const userTransactions = transactions.filter(t =>
+    t.fromUser === userId || t.toUser === userId
   );
 
   return res.json({
-    status: 'success',
+    status: "success",
     userId,
-    transactions: userTx
+    transactions: userTransactions
   });
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
