@@ -9,8 +9,10 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.3",
     "express": "^4.19.2",
+    "mongodb": "^7.0.0",
     "uuid": "^9.0.1"
   }
 }
