@@ -1,107 +1,157 @@
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 
-// Temporary in-memory wallet storage
-let users = {}; 
-// Structure:
-// users[phone] = { balance: 0, history: [] }
+// ---------------------------
+// WALLET MODEL
+// ---------------------------
+const walletSchema = new mongoose.Schema({
+    phone: { type: String, required: true, unique: true },
+    balance: { type: Number, default: 0 },
+    history: [
+        {
+            type: { type: String },   // top-up, send, receive
+            amount: Number,
+            to: String,
+            from: String,
+            date: { type: Date, default: Date.now }
+        }
+    ]
+});
 
-// Create wallet
-router.post("/create-wallet", (req, res) => {
-    const { phone } = req.body;
+const Wallet = mongoose.model("Wallet", walletSchema);
 
-    if (!phone) return res.status(400).json({ error: "Phone number is required" });
+// ---------------------------
+// CREATE WALLET
+// ---------------------------
+router.post("/create-wallet", async (req, res) => {
+    try {
+        const { phone } = req.body;
 
-    if (users[phone]) {
-        return res.status(400).json({ error: "Wallet already exists" });
+        let wallet = await Wallet.findOne({ phone });
+        if (wallet) {
+            return res.json({ message: "Wallet already exists", wallet });
+        }
+
+        wallet = await Wallet.create({ phone });
+        res.json({ message: "Wallet created successfully", wallet });
+    } catch (error) {
+        res.status(500).json({ error: "Server error", details: error.message });
     }
-
-    users[phone] = { balance: 0, history: [] };
-
-    res.json({ 
-        message: "Wallet created successfully", 
-        wallet: users[phone] 
-    });
 });
 
-// Check balance
-router.get("/check-balance/:phone", (req, res) => {
-    const { phone } = req.params;
 
-    if (!users[phone]) {
-        return res.status(404).json({ error: "Wallet not found" });
+// ---------------------------
+// CHECK BALANCE
+// ---------------------------
+router.get("/check-balance/:phone", async (req, res) => {
+    try {
+        const { phone } = req.params;
+
+        const wallet = await Wallet.findOne({ phone });
+        if (!wallet) return res.json({ phone, balance: 0 });
+
+        res.json({ phone, balance: wallet.balance });
+    } catch (error) {
+        res.status(500).json({ error: "Server error", details: error.message });
     }
-
-    res.json({ 
-        phone, 
-        balance: users[phone].balance 
-    });
 });
 
-// Top-up wallet
-router.post("/top-up", (req, res) => {
-    const { phone, amount } = req.body;
 
-    if (!users[phone]) return res.status(404).json({ error: "Wallet not found" });
-    if (!amount || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
+// ---------------------------
+// TOP UP WALLET
+// ---------------------------
+router.post("/top-up", async (req, res) => {
+    try {
+        const { phone, amount } = req.body;
 
-    users[phone].balance += amount;
+        const wallet = await Wallet.findOne({ phone });
+        if (!wallet) return res.json({ error: "Wallet not found" });
 
-    users[phone].history.push({
-        type: "top-up",
-        amount,
-        time: new Date()
-    });
+        wallet.balance += Number(amount);
 
-    res.json({
-        message: "Top-up successful",
-        newBalance: users[phone].balance
-    });
-});
+        wallet.history.push({
+            type: "top-up",
+            amount,
+            date: new Date()
+        });
 
-// Send money between wallets
-router.post("/send-money", (req, res) => {
-    const { sender, receiver, amount } = req.body;
+        await wallet.save();
 
-    if (!users[sender]) return res.status(404).json({ error: "Sender wallet not found" });
-    if (!users[receiver]) return res.status(404).json({ error: "Receiver wallet not found" });
-    if (!amount || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
-
-    if (users[sender].balance < amount) {
-        return res.status(400).json({ error: "Insufficient balance" });
+        res.json({ message: "Top-up successful", balance: wallet.balance });
+    } catch (error) {
+        res.status(500).json({ error: "Server error", details: error.message });
     }
-
-    users[sender].balance -= amount;
-    users[receiver].balance += amount;
-
-    // Add logs
-    users[sender].history.push({
-        type: "send",
-        to: receiver,
-        amount,
-        time: new Date()
-    });
-
-    users[receiver].history.push({
-        type: "receive",
-        from: sender,
-        amount,
-        time: new Date()
-    });
-
-    res.json({ message: "Transfer successful" });
 });
 
-// Transaction history
-router.get("/history/:phone", (req, res) => {
-    const { phone } = req.params;
 
-    if (!users[phone]) return res.status(404).json({ error: "Wallet not found" });
+// ---------------------------
+// SEND MONEY
+// ---------------------------
+router.post("/send-money", async (req, res) => {
+    try {
+        const { sender, receiver, amount } = req.body;
 
-    res.json({
-        phone,
-        history: users[phone].history
-    });
+        const senderWallet = await Wallet.findOne({ phone: sender });
+        const receiverWallet = await Wallet.findOne({ phone: receiver });
+
+        if (!senderWallet) return res.json({ error: "Sender wallet not found" });
+        if (!receiverWallet) return res.json({ error: "Receiver wallet not found" });
+
+        if (senderWallet.balance < amount)
+            return res.json({ error: "Insufficient balance" });
+
+        // Perform transfer
+        senderWallet.balance -= amount;
+        receiverWallet.balance += amount;
+
+        senderWallet.history.push({
+            type: "send",
+            amount,
+            to: receiver,
+            date: new Date()
+        });
+
+        receiverWallet.history.push({
+            type: "receive",
+            amount,
+            from: sender,
+            date: new Date()
+        });
+
+        await senderWallet.save();
+        await receiverWallet.save();
+
+        res.json({ message: "Transfer successful" });
+    } catch (error) {
+        res.status(500).json({ error: "Server error", details: error.message });
+    }
 });
 
+
+// ---------------------------
+// GET TRANSACTION HISTORY
+// ---------------------------
+router.get("/history/:phone", async (req, res) => {
+    try {
+        const { phone } = req.params;
+
+        const wallet = await Wallet.findOne({ phone });
+
+        if (!wallet) {
+            return res.status(404).json({ error: "Wallet not found" });
+        }
+
+        res.json({
+            phone,
+            history: wallet.history
+        });
+
+    } catch (error) {
+        res.status(500).json({ error: "Server error", details: error.message });
+    }
+});
+
+
+// ---------------------------
 module.exports = router;
