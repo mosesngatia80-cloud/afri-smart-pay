@@ -10,8 +10,9 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "express": "^4.19.2",
+    "express": "^4.21.2",
     "mongodb": "^7.0.0",
     "mongoose": "^8.19.4",
     "uuid": "^9.0.1"
