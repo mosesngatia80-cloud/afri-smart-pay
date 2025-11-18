@@ -1,181 +1,230 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
 
 const app = express();
-
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
-// ----------------------
-//  MongoDB Connection
-// ----------------------
+// --------------------------------------------------
+// 1. CONNECT TO MONGODB
+// --------------------------------------------------
 mongoose.connect(
-  "mongodb+srv://afriadmin:smartpay20@afrismartpaycluster.jyab9fb.mongodb.net/?retryWrites=true&w=majority&appName=AfriSmartPayCluster",
-  {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  }
-).then(() => console.log("MongoDB connected"))
- .catch(err => console.log("MongoDB Error:", err));
+  "mongodb+srv://afriadmin:smartpay2025@afrismartpaycluster.jyab9fb.mongodb.net/AfriSmartPay?retryWrites=true&w=majority&appName=AfriSmartPayCluster"
+)
+  .then(() => {
+    console.log("✅ Connected to MongoDB");
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB connection FAILED");
+    console.error(err);
+  });
 
-// ----------------------
-//  Wallet Schema
-// ----------------------
+// --------------------------------------------------
+// 2. WALLET MODEL
+// --------------------------------------------------
 const walletSchema = new mongoose.Schema({
-  phone: { type: String, unique: true },
+  phone: { type: String, required: true, unique: true },
   balance: { type: Number, default: 0 },
-  history: { type: Array, default: [] }
+  role: { type: String, enum: ["customer", "agent"], default: "customer" },
+  transactions: [
+    {
+      type: { type: String, enum: ["credit", "debit"] },
+      amount: Number,
+      description: String,
+      date: { type: Date, default: Date.now },
+    },
+  ],
 });
 
 const Wallet = mongoose.model("Wallet", walletSchema);
 
-// ----------------------
-//  CREATE WALLET
-// ----------------------
-app.post("/api/create-wallet", async (req, res) => {
+// --------------------------------------------------
+// 3. CREATE WALLET
+// --------------------------------------------------
+app.post('/api/create-wallet', async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone, role } = req.body;
 
-    let exists = await Wallet.findOne({ phone });
-    if (exists) {
-      return res.json({ message: "Wallet already exists", wallet: exists });
-    }
+    const existing = await Wallet.findOne({ phone });
+    if (existing) return res.json({ message: "Wallet already exists" });
 
-    const wallet = new Wallet({ phone });
+    const wallet = new Wallet({
+      phone,
+      role: role || "customer"
+    });
+
     await wallet.save();
-
     res.json({ message: "Wallet created successfully", wallet });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error creating wallet", error: err });
   }
 });
 
-// ----------------------
-//  CHECK BALANCE
-// ----------------------
-app.post("/api/check-balance", async (req, res) => {
+// --------------------------------------------------
+// 4. CHECK BALANCE
+// --------------------------------------------------
+app.get('/api/check-balance/:phone', async (req, res) => {
   try {
-    const { phone } = req.body;
+    const wallet = await Wallet.findOne({ phone: req.params.phone });
+    if (!wallet) return res.json({ message: "Wallet not found" });
 
-    let wallet = await Wallet.findOne({ phone });
-    if (!wallet) {
-      return res.status(404).json({ message: "Wallet not found" });
-    }
-
-    res.json({
-      message: "Balance retrieved successfully",
-      balance: wallet.balance,
-    });
+    res.json({ balance: wallet.balance });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Balance check error", error: err });
   }
 });
 
-// ----------------------
-//  TOP UP
-// ----------------------
-app.post("/api/top-up", async (req, res) => {
+// --------------------------------------------------
+// 5. TOP UP
+// --------------------------------------------------
+app.post('/api/top-up', async (req, res) => {
   try {
     const { phone, amount } = req.body;
 
-    let wallet = await Wallet.findOne({ phone });
-    if (!wallet) return res.status(404).json({ message: "Wallet not found" });
+    const wallet = await Wallet.findOne({ phone });
+    if (!wallet) return res.json({ message: "Wallet not found" });
 
     wallet.balance += amount;
-    wallet.history.push({
-      type: "top-up",
+    wallet.transactions.push({
+      type: "credit",
       amount,
-      date: new Date(),
+      description: "Top Up",
     });
 
     await wallet.save();
 
-    res.json({
-      message: "Top up successful",
-      balance: wallet.balance,
-    });
+    res.json({ message: "Top up successful", balance: wallet.balance });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Top up error", error: err });
   }
 });
 
-// ----------------------
-//  SEND MONEY
-// ----------------------
-app.post("/api/send-money", async (req, res) => {
+// --------------------------------------------------
+// 6. SEND MONEY (Customer → Customer)
+// --------------------------------------------------
+app.post('/api/send-money', async (req, res) => {
   try {
-    const { from, to, amount } = req.body;
+    const { fromPhone, toPhone, amount } = req.body;
 
-    let sender = await Wallet.findOne({ phone: from });
-    let receiver = await Wallet.findOne({ phone: to });
+    const sender = await Wallet.findOne({ phone: fromPhone });
+    const receiver = await Wallet.findOne({ phone: toPhone });
 
-    if (!sender) return res.status(404).json({ message: "Sender not found" });
-    if (!receiver) return res.status(404).json({ message: "Receiver not found" });
-
-    if (sender.balance < amount) {
-      return res.status(400).json({ message: "Insufficient funds" });
-    }
+    if (!sender) return res.json({ message: "Sender wallet not found" });
+    if (!receiver) return res.json({ message: "Receiver wallet not found" });
+    if (sender.balance < amount) return res.json({ message: "Insufficient balance" });
 
     sender.balance -= amount;
-    receiver.balance += amount;
-
-    sender.history.push({
-      type: "send",
-      to,
+    sender.transactions.push({
+      type: "debit",
       amount,
-      date: new Date(),
+      description: `Sent to ${toPhone}`,
     });
 
-    receiver.history.push({
-      type: "receive",
-      from,
+    receiver.balance += amount;
+    receiver.transactions.push({
+      type: "credit",
       amount,
-      date: new Date(),
+      description: `Received from ${fromPhone}`,
     });
 
     await sender.save();
     await receiver.save();
 
-    res.json({
-      message: "Money sent successfully",
-      sender_balance: sender.balance,
-    });
+    res.json({ message: "Transfer successful", senderBalance: sender.balance });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Send money error", error: err });
   }
 });
 
-// ----------------------
-//  TRANSACTION HISTORY
-// ----------------------
-app.post("/api/transaction-history", async (req, res) => {
+// --------------------------------------------------
+// 7. TRANSACTION HISTORY
+// --------------------------------------------------
+app.get('/api/transactions/:phone', async (req, res) => {
   try {
-    const { phone } = req.body;
+    const wallet = await Wallet.findOne({ phone: req.params.phone });
+    if (!wallet) return res.json({ message: "Wallet not found" });
 
-    let wallet = await Wallet.findOne({ phone });
-    if (!wallet) {
-      return res.status(404).json({ message: "Wallet not found" });
-    }
-
-    res.json({
-      message: "Transaction history retrieved",
-      history: wallet.history,
-    });
+    res.json(wallet.transactions);
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Transaction error", error: err });
   }
 });
 
-// ----------------------
-//  SERVER
-// ----------------------
-const PORT = process.env.PORT || 3000;
+// --------------------------------------------------
+// 8. DEPOSIT (Agent → Customer)
+// --------------------------------------------------
+app.post('/api/deposit', async (req, res) => {
+  try {
+    const { agentPhone, customerPhone, amount } = req.body;
+
+    const agent = await Wallet.findOne({ phone: agentPhone });
+    const customer = await Wallet.findOne({ phone: customerPhone });
+
+    if (!agent) return res.json({ message: "Agent wallet not found" });
+    if (!customer) return res.json({ message: "Customer wallet not found" });
+
+    customer.balance += amount;
+    customer.transactions.push({
+      type: "credit",
+      amount,
+      description: `Deposit by agent ${agentPhone}`,
+    });
+
+    await customer.save();
+
+    res.json({
+      message: "Deposit successful",
+      customerBalance: customer.balance,
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: "Deposit error", error: err });
+  }
+});
+
+// --------------------------------------------------
+// 9. WITHDRAW (Customer → Agent)
+// --------------------------------------------------
+app.post('/api/withdraw', async (req, res) => {
+  try {
+    const { customerPhone, agentPhone, amount } = req.body;
+
+    const customer = await Wallet.findOne({ phone: customerPhone });
+    const agent = await Wallet.findOne({ phone: agentPhone });
+
+    if (!customer) return res.json({ message: "Customer wallet not found" });
+    if (!agent) return res.json({ message: "Agent wallet not found" });
+    if (customer.balance < amount) return res.json({ message: "Insufficient customer balance" });
+
+    customer.balance -= amount;
+    customer.transactions.push({
+      type: "debit",
+      amount,
+      description: `Withdrawal through agent ${agentPhone}`,
+    });
+
+    await customer.save();
+
+    res.json({
+      message: "Withdrawal successful",
+      customerBalance: customer.balance,
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: "Withdraw error", error: err });
+  }
+});
+
+// --------------------------------------------------
+// 10. START SERVER
+// --------------------------------------------------
+const PORT = 3000;
 app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
+  console.log(`🚀 Afri Smart Pay API running on port ${PORT}`);
 });
