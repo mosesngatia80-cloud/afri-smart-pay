@@ -1,257 +1,208 @@
-# stop any running node processes
-pkill node || true
-
-# backup current server.js just in case
-mv server.js server.js.bak || true
-
-# write new secure server.js (the file contents follow below)
-cat > server.js <<'EOF'
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const bcrypt = require('bcryptjs');
-require('dotenv').config();
+const express = require("express");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const cors = require("cors");
 
 const app = express();
 app.use(express.json());
 app.use(cors());
-app.use(helmet());
 
-// basic rate limiter
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200, // limit each IP
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
+// ----------------------
+// MONGO CONNECTION
+// ----------------------
+mongoose.connect("mongodb+srv://afriadmin:Afrismartpay2025@afrismartpaycluster.jyab9fb.mongodb.net/afri-smart-pay?retryWrites=true&w=majority&appName=AfriSmartPayCluster", {})
+.then(() => console.log("MongoDB Connected"))
+.catch(err => console.error("MongoDB Error:", err));
 
-// ---------- MONGODB ----------
-const MONGO_URI = process.env.MONGO_URI || '';
-if (!MONGO_URI) {
-  console.error('❌ MONGO_URI not set in .env');
-  process.exit(1);
-}
-
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => {
-    console.error('❌ MongoDB connection FAILED');
-    console.error(err);
-    process.exit(1);
-  });
-
-// ---------- MODELS ----------
+// ----------------------
+// WALLET SCHEMA
+// ----------------------
 const walletSchema = new mongoose.Schema({
-  phone: { type: String, required: true, unique: true },
-  balance: { type: Number, default: 0 },
-  role: { type: String, enum: ['customer', 'agent'], default: 'customer' },
-  pinHash: { type: String, default: null }, // hashed PIN
-  transactions: [
-    {
-      type: String, // allow legacy values; we'll normalize in code
-      amount: Number,
-      description: String,
-      date: { type: Date, default: Date.now },
-      meta: mongoose.Schema.Types.Mixed
+    phone: { type: String, unique: true },
+    name: String,
+    balance: { type: Number, default: 0 },
+    pinHash: String,
+    attempts: { type: Number, default: 0 },
+    isLocked: { type: Boolean, default: false },
+    transactions: [
+        {
+            type: { type: String },
+            amount: Number,
+            from: String,
+            to: String,
+            date: { type: Date, default: Date.now }
+        }
+    ]
+});
+
+const Wallet = mongoose.model("Wallet", walletSchema);
+
+// ----------------------
+// ROOT ROUTE
+// ----------------------
+app.get("/", (req, res) => {
+    res.send("Welcome to Afri Smart Pay API 💳 — Connecting Africa through smart payments!");
+});
+
+// ----------------------
+// CREATE WALLET
+// ----------------------
+app.post("/api/create-wallet", async (req, res) => {
+    try {
+        const { phone, name, pin } = req.body;
+        if (!phone || !name || !pin) {
+            return res.status(400).json({ error: "Missing required fields" });
+        }
+        const exists = await Wallet.findOne({ phone });
+        if (exists) return res.status(400).json({ error: "Wallet already exists" });
+
+        const hashed = await bcrypt.hash(pin, 10);
+        const wallet = await Wallet.create({ phone, name, pinHash: hashed });
+
+        res.json({ message: "Wallet created successfully", wallet });
+
+    } catch (err) {
+        console.error("Create Wallet Error:", err);
+        res.status(500).json({ error: "Internal server error" });
     }
-  ]
-}, { timestamps: true });
-
-const Wallet = mongoose.model('Wallet', walletSchema);
-
-// ---------- HELPERS ----------
-async function verifyPin(wallet, pin) {
-  if (!wallet.pinHash) return false;
-  return bcrypt.compare(String(pin), wallet.pinHash);
-}
-
-// normalize transaction type for new entries into 'credit' or 'debit'
-function normalizeType(direction) {
-  return direction === 'credit' ? 'credit' : 'debit';
-}
-
-// ---------- ROUTES ----------
-
-// Health
-app.get('/', (req, res) => res.json({ ok: true, service: 'Afri Smart Pay' }));
-
-// Create wallet
-app.post('/api/create-wallet', async (req, res) => {
-  try {
-    const { phone, role } = req.body;
-    if (!phone) return res.status(400).json({ message: 'phone required' });
-
-    const existing = await Wallet.findOne({ phone });
-    if (existing) return res.status(400).json({ message: 'Wallet already exists' });
-
-    const w = new Wallet({ phone, role: role || 'customer' });
-    await w.save();
-    res.json({ message: 'Wallet created successfully', wallet: { phone: w.phone, role: w.role, balance: w.balance } });
-  } catch (err) {
-    res.status(500).json({ message: 'Error creating wallet', error: err.toString() });
-  }
 });
 
-// Set PIN (hashes)
-app.post('/api/set-pin', async (req, res) => {
-  try {
-    const { phone, pin } = req.body;
-    if (!phone || !pin) return res.status(400).json({ message: 'phone and pin required' });
-
-    const wallet = await Wallet.findOne({ phone });
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-
-    const salt = await bcrypt.genSalt(10);
-    wallet.pinHash = await bcrypt.hash(String(pin), salt);
-    await wallet.save();
-
-    res.json({ message: 'PIN set successfully' });
-  } catch (err) {
-    res.status(500).json({ message: 'Set PIN error', error: err.toString() });
-  }
+// ----------------------
+// CHECK BALANCE
+// ----------------------
+app.get("/api/check-balance/:phone", async (req, res) => {
+    try {
+        const wallet = await Wallet.findOne({ phone: req.params.phone });
+        if (!wallet) return res.status(404).json({ error: "Wallet not found" });
+        res.json({ balance: wallet.balance });
+    } catch (err) {
+        console.error("Balance Error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
 });
 
-// Top up (no PIN)
-app.post('/api/top-up', async (req, res) => {
-  try {
-    const { phone, amount } = req.body;
-    if (!phone || typeof amount !== 'number') return res.status(400).json({ message: 'phone and numeric amount required' });
+// ----------------------
+// TOP UP
+// ----------------------
+app.post("/api/top-up", async (req, res) => {
+    try {
+        const { phone, amount } = req.body;
+        const wallet = await Wallet.findOne({ phone });
+        if (!wallet) return res.status(404).json({ error: "Wallet not found" });
 
-    const wallet = await Wallet.findOne({ phone });
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
+        wallet.balance += Number(amount);
+        wallet.transactions.push({
+            type: "topup",
+            amount,
+            from: "SYSTEM",
+            to: phone
+        });
 
-    wallet.balance += amount;
-    wallet.transactions.push({ type: 'credit', amount, description: 'Top Up' });
-    await wallet.save();
+        await wallet.save();
+        res.json({ message: "Top-up successful", newBalance: wallet.balance });
 
-    res.json({ message: 'Top up successful', balance: wallet.balance });
-
-  } catch (err) {
-    res.status(500).json({ message: 'Top up error', error: err.toString() });
-  }
+    } catch (err) {
+        console.error("Top-up Error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
 });
 
-// Send money (requires sender PIN)
-app.post('/api/send-money', async (req, res) => {
-  try {
-    const { fromPhone, toPhone, amount, pin } = req.body;
-    if (!fromPhone || !toPhone || typeof amount !== 'number' || !pin) return res.status(400).json({ message: 'fromPhone, toPhone, numeric amount and pin required' });
+// ----------------------
+// SEND MONEY
+// ----------------------
+app.post("/api/send-money", async (req, res) => {
+    try {
+        const { senderPhone, receiverPhone, amount, pin } = req.body;
 
-    const sender = await Wallet.findOne({ phone: fromPhone });
-    const receiver = await Wallet.findOne({ phone: toPhone });
+        if (!senderPhone || !receiverPhone || !amount || !pin) {
+            return res.status(400).json({ error: "Missing required fields" });
+        }
 
-    if (!sender) return res.status(404).json({ message: 'Sender wallet not found' });
-    if (!receiver) return res.status(404).json({ message: 'Receiver wallet not found' });
+        const sender = await Wallet.findOne({ phone: senderPhone });
+        if (!sender) return res.status(404).json({ error: "Sender wallet not found" });
 
-    const ok = await verifyPin(sender, pin);
-    if (!ok) return res.status(401).json({ message: 'Invalid PIN' });
+        if (sender.isLocked) {
+            return res.status(403).json({ error: "Wallet locked due to too many wrong PIN attempts" });
+        }
 
-    if (sender.balance < amount) return res.status(400).json({ message: 'Insufficient balance' });
+        const correctPin = await bcrypt.compare(pin, sender.pinHash);
+        if (!correctPin) {
+            sender.attempts += 1;
 
-    // Perform transfer
-    sender.balance -= amount;
-    sender.transactions.push({ type: 'debit', amount, description: `Sent to ${toPhone}` });
+            if (sender.attempts >= 3) {
+                sender.isLocked = true;
+                await sender.save();
+                return res.status(403).json({ error: "Wallet locked after 3 wrong PIN attempts" });
+            }
 
-    receiver.balance += amount;
-    receiver.transactions.push({ type: 'credit', amount, description: `Received from ${fromPhone}` });
+            await sender.save();
+            return res.status(401).json({
+                error: "Incorrect PIN",
+                remainingAttempts: 3 - sender.attempts
+            });
+        }
 
-    await sender.save();
-    await receiver.save();
+        sender.attempts = 0;
+        await sender.save();
 
-    res.json({ message: 'Transfer successful', senderBalance: sender.balance });
-  } catch (err) {
-    res.status(500).json({ message: 'Send money error', error: err.toString() });
-  }
+        if (amount <= 0) return res.status(400).json({ error: "Invalid amount" });
+        if (sender.balance < amount) return res.status(400).json({ error: "Insufficient balance" });
+
+        const receiver = await Wallet.findOne({ phone: receiverPhone });
+        if (!receiver) return res.status(404).json({ error: "Receiver wallet not found" });
+
+        sender.balance -= amount;
+        receiver.balance += amount;
+
+        sender.transactions.push({
+            type: "debit",
+            amount,
+            from: senderPhone,
+            to: receiverPhone
+        });
+
+        receiver.transactions.push({
+            type: "credit",
+            amount,
+            from: senderPhone,
+            to: receiverPhone
+        });
+
+        await sender.save();
+        await receiver.save();
+
+        res.json({
+            message: "Transfer successful",
+            from: senderPhone,
+            to: receiverPhone,
+            amount,
+            newBalance: sender.balance
+        });
+
+    } catch (err) {
+        console.error("Send Money Error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
 });
 
-// Deposit (Agent -> Customer) - agent must exist but no PIN required here (agent gives cash physically)
-app.post('/api/deposit', async (req, res) => {
-  try {
-    const { agentPhone, customerPhone, amount } = req.body;
-    if (!agentPhone || !customerPhone || typeof amount !== 'number') return res.status(400).json({ message: 'agentPhone, customerPhone, numeric amount required' });
-
-    const agent = await Wallet.findOne({ phone: agentPhone });
-    const customer = await Wallet.findOne({ phone: customerPhone });
-    if (!agent) return res.status(404).json({ message: 'Agent or customer wallet not found' });
-
-    customer.balance += amount;
-    customer.transactions.push({ type: 'credit', amount, description: `Deposit by agent ${agentPhone}` });
-    await customer.save();
-
-    res.json({ message: 'Deposit successful', customerBalance: customer.balance });
-  } catch (err) {
-    res.status(500).json({ message: 'Deposit error', error: err.toString() });
-  }
+// ----------------------
+// TRANSACTION HISTORY
+// ----------------------
+app.get("/api/transaction-history/:phone", async (req, res) => {
+    try {
+        const wallet = await Wallet.findOne({ phone: req.params.phone });
+        if (!wallet) return res.status(404).json({ error: "Wallet not found" });
+        res.json({ transactions: wallet.transactions });
+    } catch (err) {
+        console.error("History Error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
 });
 
-// Withdraw (Customer -> Agent) requires customer PIN
-app.post('/api/withdraw', async (req, res) => {
-  try {
-    const { customerPhone, agentPhone, amount, pin } = req.body;
-    if (!customerPhone || !agentPhone || typeof amount !== 'number' || !pin) return res.status(400).json({ message: 'customerPhone, agentPhone, numeric amount and pin required' });
-
-    const customer = await Wallet.findOne({ phone: customerPhone });
-    const agent = await Wallet.findOne({ phone: agentPhone });
-    if (!customer || !agent) return res.status(404).json({ message: 'Customer or agent wallet not found' });
-
-    const ok = await verifyPin(customer, pin);
-    if (!ok) return res.status(401).json({ message: 'Invalid PIN' });
-
-    if (customer.balance < amount) return res.status(400).json({ message: 'Insufficient customer balance' });
-
-    customer.balance -= amount;
-    customer.transactions.push({ type: 'debit', amount, description: `Withdrawal through agent ${agentPhone}` });
-    await customer.save();
-
-    res.json({ message: 'Withdrawal successful', customerBalance: customer.balance });
-  } catch (err) {
-    res.status(500).json({ message: 'Withdraw error', error: err.toString() });
-  }
-});
-
-// Check balance
-app.get('/api/check-balance/:phone', async (req, res) => {
-  try {
-    const wallet = await Wallet.findOne({ phone: req.params.phone });
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-    res.json({ balance: wallet.balance });
-  } catch (err) {
-    res.status(500).json({ message: 'Balance check error', error: err.toString() });
-  }
-});
-
-// Transaction history (latest first)
-app.get('/api/transactions/:phone', async (req, res) => {
-  try {
-    const wallet = await Wallet.findOne({ phone: req.params.phone });
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-    const tx = (wallet.transactions || []).slice().reverse();
-    res.json(tx);
-  } catch (err) {
-    res.status(500).json({ message: 'Transaction error', error: err.toString() });
-  }
-});
-
-// start server
+// ----------------------
+// START SERVER
+// ----------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Afri Smart Pay API running on port ${PORT}`);
+    console.log(`🚀 Afri Smart Pay API running on port ${PORT}`);
 });
-EOF
-
-# create a .env file template (edit MONGO_URI to your actual connection string)
-cat > .env <<'EENV'
-# Replace with your actual connection string. Example:
-# MONGO_URI=mongodb+srv://afriadmin:smartpay2025@afrismartpaycluster.jyab9fb.mongodb.net/AfriSmartPay?retryWrites=true&w=majority&appName=AfriSmartPayCluster
-MONGO_URI=YOUR_MONGO_URI_HERE
-PORT=3000
-EENV
-
-# install required npm packages
-npm install express mongoose cors dotenv helmet express-rate-limit bcryptjs
-
-# start the server
-node server.js
