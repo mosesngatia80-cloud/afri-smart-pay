@@ -14,6 +14,7 @@ mongoose.connect("mongodb+srv://afriadmin:Afrismartpay2025@afrismartpaycluster.j
 .then(() => console.log("MongoDB Connected"))
 .catch(err => console.error("MongoDB Error:", err));
 
+
 // ----------------------
 // WALLET SCHEMA
 // ----------------------
@@ -37,6 +38,7 @@ const walletSchema = new mongoose.Schema({
 
 const Wallet = mongoose.model("Wallet", walletSchema);
 
+
 // ----------------------
 // ROOT ROUTE
 // ----------------------
@@ -44,20 +46,28 @@ app.get("/", (req, res) => {
     res.send("Welcome to Afri Smart Pay API 💳 — Connecting Africa through smart payments!");
 });
 
+
 // ----------------------
 // CREATE WALLET
 // ----------------------
 app.post("/api/create-wallet", async (req, res) => {
     try {
         const { phone, name, pin } = req.body;
+
         if (!phone || !name || !pin) {
             return res.status(400).json({ error: "Missing required fields" });
         }
+
         const exists = await Wallet.findOne({ phone });
         if (exists) return res.status(400).json({ error: "Wallet already exists" });
 
         const hashed = await bcrypt.hash(pin, 10);
-        const wallet = await Wallet.create({ phone, name, pinHash: hashed });
+
+        const wallet = await Wallet.create({
+            phone,
+            name,
+            pinHash: hashed
+        });
 
         res.json({ message: "Wallet created successfully", wallet });
 
@@ -67,19 +77,24 @@ app.post("/api/create-wallet", async (req, res) => {
     }
 });
 
+
 // ----------------------
 // CHECK BALANCE
 // ----------------------
 app.get("/api/check-balance/:phone", async (req, res) => {
     try {
         const wallet = await Wallet.findOne({ phone: req.params.phone });
+
         if (!wallet) return res.status(404).json({ error: "Wallet not found" });
+
         res.json({ balance: wallet.balance });
+
     } catch (err) {
         console.error("Balance Error:", err);
         res.status(500).json({ error: "Internal server error" });
     }
 });
+
 
 // ----------------------
 // TOP UP
@@ -87,10 +102,12 @@ app.get("/api/check-balance/:phone", async (req, res) => {
 app.post("/api/top-up", async (req, res) => {
     try {
         const { phone, amount } = req.body;
+
         const wallet = await Wallet.findOne({ phone });
         if (!wallet) return res.status(404).json({ error: "Wallet not found" });
 
         wallet.balance += Number(amount);
+
         wallet.transactions.push({
             type: "topup",
             amount,
@@ -99,7 +116,11 @@ app.post("/api/top-up", async (req, res) => {
         });
 
         await wallet.save();
-        res.json({ message: "Top-up successful", newBalance: wallet.balance });
+
+        res.json({
+            message: "Top-up successful",
+            newBalance: wallet.balance
+        });
 
     } catch (err) {
         console.error("Top-up Error:", err);
@@ -107,8 +128,9 @@ app.post("/api/top-up", async (req, res) => {
     }
 });
 
+
 // ----------------------
-// SEND MONEY
+// SEND MONEY (FULL SECURITY)
 // ----------------------
 app.post("/api/send-money", async (req, res) => {
     try {
@@ -146,10 +168,15 @@ app.post("/api/send-money", async (req, res) => {
         await sender.save();
 
         if (amount <= 0) return res.status(400).json({ error: "Invalid amount" });
-        if (sender.balance < amount) return res.status(400).json({ error: "Insufficient balance" });
+
+        if (sender.balance < amount) {
+            return res.status(400).json({ error: "Insufficient balance" });
+        }
 
         const receiver = await Wallet.findOne({ phone: receiverPhone });
-        if (!receiver) return res.status(404).json({ error: "Receiver wallet not found" });
+        if (!receiver) {
+            return res.status(404).json({ error: "Receiver wallet not found" });
+        }
 
         sender.balance -= amount;
         receiver.balance += amount;
@@ -171,7 +198,7 @@ app.post("/api/send-money", async (req, res) => {
         await sender.save();
         await receiver.save();
 
-        res.json({
+        return res.json({
             message: "Transfer successful",
             from: senderPhone,
             to: receiverPhone,
@@ -185,22 +212,27 @@ app.post("/api/send-money", async (req, res) => {
     }
 });
 
+
 // ----------------------
 // TRANSACTION HISTORY
 // ----------------------
 app.get("/api/transaction-history/:phone", async (req, res) => {
     try {
         const wallet = await Wallet.findOne({ phone: req.params.phone });
+
         if (!wallet) return res.status(404).json({ error: "Wallet not found" });
+
         res.json({ transactions: wallet.transactions });
+
     } catch (err) {
         console.error("History Error:", err);
         res.status(500).json({ error: "Internal server error" });
     }
 });
 
+
 // ----------------------
-// START SERVER
+// SERVER START
 // ----------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
