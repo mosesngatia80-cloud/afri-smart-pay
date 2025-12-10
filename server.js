@@ -8,20 +8,21 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ================================
-//  DIRECT MONGODB CONNECTION
-// ================================
+// =========================================
+// MONGODB CONNECTION
+// =========================================
+
 mongoose
   .connect(
-    "mongodb+srv://afriadmin:NgatiaAfr1Pay2025@afrismartpaycluster.jyab9fb.mongodb.net/afrismpaydb?retryWrites=true&w=majority&appName=AfriSmartPayCluster"
+    "mongodb+srv://afriadmin:NgatiaPay2025@afrismartpaycluster.jyab9fb.mongodb.net/afrismpaydb?retryWrites=true&w=majority&appName=AfriSmartPayCluster"
   )
   .then(() => console.log("MongoDB Connected"))
-  .catch((err) => console.error("MongoDB Error:", err));
+  .catch((err) => console.log("MongoDB Error:", err));
 
+// =========================================
+// WALLET SCHEMA
+// =========================================
 
-// ================================
-//  WALLET SCHEMA
-// ================================
 const walletSchema = new mongoose.Schema({
   phone: { type: String, unique: true },
   balance: { type: Number, default: 0 },
@@ -31,16 +32,16 @@ const walletSchema = new mongoose.Schema({
 
 const Wallet = mongoose.model("Wallet", walletSchema);
 
+// =========================================
+// CREATE WALLET
+// =========================================
 
-// ================================
-//  CREATE WALLET
-// ================================
 app.post("/api/create-wallet", async (req, res) => {
   try {
     const { phone, pin } = req.body;
 
-    const existing = await Wallet.findOne({ phone });
-    if (existing) {
+    const exists = await Wallet.findOne({ phone });
+    if (exists) {
       return res.json({ message: "Wallet already exists" });
     }
 
@@ -54,17 +55,16 @@ app.post("/api/create-wallet", async (req, res) => {
     });
 
     await wallet.save();
-
     res.json({ message: "Wallet created successfully", wallet });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
+// =========================================
+// CHECK BALANCE
+// =========================================
 
-// ================================
-//  CHECK BALANCE
-// ================================
 app.get("/api/check-balance/:phone", async (req, res) => {
   try {
     const phone = req.params.phone;
@@ -78,10 +78,10 @@ app.get("/api/check-balance/:phone", async (req, res) => {
   }
 });
 
+// =========================================
+// TOP UP WALLET
+// =========================================
 
-// ================================
-//  TOP UP WALLET
-// ================================
 app.post("/api/top-up", async (req, res) => {
   try {
     const { phone, amount } = req.body;
@@ -90,7 +90,6 @@ app.post("/api/top-up", async (req, res) => {
     if (!wallet) return res.json({ message: "Wallet not found" });
 
     wallet.balance += amount;
-
     wallet.transactions.push({
       type: "top-up",
       amount,
@@ -105,10 +104,10 @@ app.post("/api/top-up", async (req, res) => {
   }
 });
 
+// =========================================
+// SEND MONEY
+// =========================================
 
-// ================================
-//  SEND MONEY
-// ================================
 app.post("/api/send-money", async (req, res) => {
   try {
     const { sender, receiver, amount, pin } = req.body;
@@ -116,8 +115,10 @@ app.post("/api/send-money", async (req, res) => {
     const senderWallet = await Wallet.findOne({ phone: sender });
     const receiverWallet = await Wallet.findOne({ phone: receiver });
 
-    if (!senderWallet) return res.json({ message: "Sender wallet not found" });
-    if (!receiverWallet) return res.json({ message: "Receiver wallet not found" });
+    if (!senderWallet)
+      return res.json({ message: "Sender wallet not found" });
+    if (!receiverWallet)
+      return res.json({ message: "Receiver wallet not found" });
 
     const pinMatch = await bcrypt.compare(pin, senderWallet.pin);
     if (!pinMatch) return res.json({ message: "Incorrect PIN" });
@@ -126,11 +127,9 @@ app.post("/api/send-money", async (req, res) => {
       return res.json({ message: "Insufficient funds" });
     }
 
-    // Update balances
     senderWallet.balance -= amount;
     receiverWallet.balance += amount;
 
-    // Log transactions
     senderWallet.transactions.push({
       type: "send",
       amount,
@@ -154,10 +153,10 @@ app.post("/api/send-money", async (req, res) => {
   }
 });
 
+// =========================================
+// TRANSACTION HISTORY
+// =========================================
 
-// ================================
-//  TRANSACTION HISTORY
-// ================================
 app.get("/api/transaction-history/:phone", async (req, res) => {
   try {
     const phone = req.params.phone;
@@ -171,11 +170,12 @@ app.get("/api/transaction-history/:phone", async (req, res) => {
   }
 });
 
+// =========================================
+// START SERVER
+// =========================================
 
-// ================================
-//  START SERVER
-// ================================
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Afri Smart Pay API running on port ${PORT}`);
 });
