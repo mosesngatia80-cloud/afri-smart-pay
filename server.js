@@ -13,6 +13,18 @@ dotenv.config();
 const app = express();
 
 // =============================
+// PAYPAL LIVE SAFETY CHECK
+// =============================
+if (
+  process.env.PAYPAL_MODE === "live" &&
+  (!process.env.PAYPAL_LIVE_CLIENT_ID ||
+    !process.env.PAYPAL_LIVE_CLIENT_SECRET)
+) {
+  console.error("❌ LIVE PayPal mode enabled without live credentials");
+  process.exit(1);
+}
+
+// =============================
 // MIDDLEWARE
 // =============================
 app.use(cors());

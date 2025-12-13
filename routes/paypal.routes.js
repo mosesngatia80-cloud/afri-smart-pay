@@ -1,31 +1,37 @@
 import express from "express";
-import dotenv from "dotenv";
 import Wallet from "../models/Wallet.js";
 
-dotenv.config();
 const router = express.Router();
 
 // =============================
-// PayPal Environment Variables
+// PAYPAL MODE & CREDENTIALS
 // =============================
-const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
-const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
 const PAYPAL_MODE = process.env.PAYPAL_MODE || "sandbox";
+
+const PAYPAL_CLIENT_ID =
+  PAYPAL_MODE === "live"
+    ? process.env.PAYPAL_LIVE_CLIENT_ID
+    : process.env.PAYPAL_SANDBOX_CLIENT_ID;
+
+const PAYPAL_CLIENT_SECRET =
+  PAYPAL_MODE === "live"
+    ? process.env.PAYPAL_LIVE_CLIENT_SECRET
+    : process.env.PAYPAL_SANDBOX_CLIENT_SECRET;
 
 const BASE_URL =
   PAYPAL_MODE === "live"
-    ? "https://api.paypal.com"
-    : "https://api.sandbox.paypal.com";
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
 
 // =============================
-// Generate PayPal Access Token
+// ACCESS TOKEN
 // =============================
-async function generateAccessToken() {
+async function getAccessToken() {
   const auth = Buffer.from(
     `${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`
   ).toString("base64");
 
-  const response = await fetch(`${BASE_URL}/v1/oauth2/token`, {
+  const res = await fetch(`${BASE_URL}/v1/oauth2/token`, {
     method: "POST",
     headers: {
       Authorization: `Basic ${auth}`,
@@ -34,23 +40,23 @@ async function generateAccessToken() {
     body: "grant_type=client_credentials",
   });
 
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error_description || "PayPal token error");
+  const data = await res.json();
+  if (!res.ok) throw new Error("Failed to get PayPal token");
   return data.access_token;
 }
 
 // =============================
-// Create PayPal Order
+// CREATE ORDER
 // =============================
 router.post("/create-order", async (req, res) => {
   try {
-    const accessToken = await generateAccessToken();
+    const token = await getAccessToken();
 
     const response = await fetch(`${BASE_URL}/v2/checkout/orders`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         intent: "CAPTURE",
@@ -62,42 +68,39 @@ router.post("/create-order", async (req, res) => {
       }),
     });
 
-    const data = await response.json();
-    res.json(data);
+    const order = await response.json();
+    res.json(order);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // =============================
-// Capture PayPal Order + Credit Wallet
+// CAPTURE ORDER
 // =============================
 router.post("/capture-order", async (req, res) => {
   try {
     const { orderID, phone } = req.body;
-    const accessToken = await generateAccessToken();
+    const token = await getAccessToken();
 
-    const captureRes = await fetch(
+    const response = await fetch(
       `${BASE_URL}/v2/checkout/orders/${orderID}/capture`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${token}`,
         },
       }
     );
 
-    const paypal = await captureRes.json();
+    const paypal = await response.json();
 
     if (paypal.status !== "COMPLETED") {
-      return res.status(400).json({
-        error: "Payment not completed",
-        paypal,
-      });
+      return res.status(400).json({ error: "Payment not completed", paypal });
     }
 
-    const amount = parseFloat(
+    const amount = Number(
       paypal.purchase_units[0].payments.captures[0].amount.value
     );
 

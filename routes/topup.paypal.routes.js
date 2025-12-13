@@ -3,7 +3,21 @@ import Wallet from "../models/Wallet.js";
 
 const router = express.Router();
 
+// =============================
+// PAYPAL MODE & CREDENTIALS
+// =============================
 const PAYPAL_MODE = process.env.PAYPAL_MODE || "sandbox";
+
+const PAYPAL_CLIENT_ID =
+  PAYPAL_MODE === "live"
+    ? process.env.PAYPAL_LIVE_CLIENT_ID
+    : process.env.PAYPAL_SANDBOX_CLIENT_ID;
+
+const PAYPAL_CLIENT_SECRET =
+  PAYPAL_MODE === "live"
+    ? process.env.PAYPAL_LIVE_CLIENT_SECRET
+    : process.env.PAYPAL_SANDBOX_CLIENT_SECRET;
+
 const BASE_URL =
   PAYPAL_MODE === "live"
     ? "https://api-m.paypal.com"
@@ -14,7 +28,7 @@ const BASE_URL =
 // =============================
 async function getAccessToken() {
   const auth = Buffer.from(
-    `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+    `${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`
   ).toString("base64");
 
   const res = await fetch(`${BASE_URL}/v1/oauth2/token`, {
@@ -48,10 +62,7 @@ router.post("/create", async (req, res) => {
         intent: "CAPTURE",
         purchase_units: [
           {
-            amount: {
-              currency_code: "USD",
-              value: "10.00",
-            },
+            amount: { currency_code: "USD", value: "10.00" },
           },
         ],
       }),
@@ -86,10 +97,7 @@ router.post("/capture", async (req, res) => {
     const paypal = await response.json();
 
     if (paypal.status !== "COMPLETED") {
-      return res.status(400).json({
-        error: "Payment not completed",
-        paypal,
-      });
+      return res.status(400).json({ error: "Payment not completed", paypal });
     }
 
     const amount = Number(
