@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 
 import paypalRoutes from "./routes/paypal.routes.js";
 import paypalTopupRoutes from "./routes/topup.paypal.routes.js";
+import transactionRoutes from "./routes/transactions.routes.js";
 
 dotenv.config();
 
@@ -28,12 +29,9 @@ mongoose
 // =============================
 // ROUTES
 // =============================
-
-// OLD PAYPAL ROUTES (KEEP)
 app.use("/api/paypal", paypalRoutes);
-
-// NEW CLEAN TOP-UP ROUTES
 app.use("/api/topup/paypal", paypalTopupRoutes);
+app.use("/api/transactions", transactionRoutes);
 
 // HEALTH CHECK
 app.get("/", (req, res) => {
