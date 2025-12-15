@@ -1,138 +1,79 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const dotenv = require("dotenv");
-
-dotenv.config();
+const bodyParser = require("body-parser");
+const cors = require("cors");
+require("dotenv").config();
 
 const app = express();
-app.use(express.json());
 
-/* ===============================
-   DATABASE CONNECTION (FIXED)
-================================ */
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log("✅ MongoDB connected");
-  })
-  .catch(err => {
-    console.error("❌ MongoDB connection error:", err.message);
-  });
+/* ---------------- MIDDLEWARE ---------------- */
+app.use(cors());
+app.use(bodyParser.json());
 
-/* ===============================
-   MODELS
-================================ */
-const walletSchema = new mongoose.Schema({
-  phone: { type: String, unique: true },
-  balance: { type: Number, default: 0 },
-  currency: { type: String, default: "KES" },
-  status: { type: String, default: "active" }
-}, { timestamps: true });
-
-const Wallet = mongoose.model("Wallet", walletSchema);
-
-const transactionSchema = new mongoose.Schema({
-  transId: { type: String, unique: true },
-  phone: String,
-  amount: Number,
-  type: String,
-  status: String
-}, { timestamps: true });
-
-const Transaction = mongoose.model("Transaction", transactionSchema);
-
-/* ===============================
-   HEALTH CHECK
-================================ */
+/* ---------------- BASIC HEALTH CHECK ---------------- */
 app.get("/", (req, res) => {
-  res.send("🚀 Afri Smart Pay API running");
+  res.send("🚀 Afri Smart Pay API is running");
 });
 
-/* ===============================
-   CHECK BALANCE
-================================ */
-app.get("/api/check-balance", async (req, res) => {
-  const { phone } = req.query;
-  const wallet = await Wallet.findOne({ phone });
-  res.json({
-    phone,
-    balance: wallet ? wallet.balance : 0
+/* ---------------- MONGODB CONNECTION ---------------- */
+const MONGO_URI = process.env.MONGO_URI;
+
+if (!MONGO_URI) {
+  console.error("❌ MONGO_URI not set");
+  process.exit(1);
+}
+
+mongoose
+  .connect(MONGO_URI)
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => {
+    console.error("❌ MongoDB connection error:", err.message);
+    process.exit(1);
   });
+
+/* ---------------- SIMPLE WALLET SCHEMA ---------------- */
+/* (Temporary – proves routing works. You can replace with your full model later) */
+const walletSchema = new mongoose.Schema({
+  phone: { type: String, required: true, unique: true },
+  balance: { type: Number, default: 0 },
 });
 
-/* ===============================
-   C2B VALIDATION
-================================ */
-app.post("/api/c2b/validation", (req, res) => {
-  console.log("🔎 C2B Validation:", req.body);
-  return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-});
+const Wallet = mongoose.models.Wallet || mongoose.model("Wallet", walletSchema);
 
-/* ===============================
-   C2B CONFIRMATION (WALLET CREDIT)
-================================ */
-app.post("/api/c2b/confirmation", async (req, res) => {
+/* ---------------- ROUTES ---------------- */
+
+/**
+ * POST /api/check-balance
+ * body: { phone: "2547XXXXXXXX" }
+ */
+app.post("/api/check-balance", async (req, res) => {
   try {
-    const { TransID, MSISDN, TransAmount } = req.body;
+    const { phone } = req.body;
 
-    const exists = await Transaction.findOne({ transId: TransID });
-    if (exists) {
-      return res.json({ ResultCode: 0, ResultDesc: "Already processed" });
+    if (!phone) {
+      return res.status(400).json({ error: "Phone number is required" });
     }
 
-    await Transaction.create({
-      transId: TransID,
-      phone: MSISDN,
-      amount: Number(TransAmount),
-      type: "C2B_TOPUP",
-      status: "completed"
+    let wallet = await Wallet.findOne({ phone });
+
+    if (!wallet) {
+      wallet = await Wallet.create({ phone, balance: 0 });
+    }
+
+    return res.json({
+      success: true,
+      phone: wallet.phone,
+      balance: wallet.balance,
     });
-
-    await Wallet.findOneAndUpdate(
-      { phone: MSISDN },
-      { $inc: { balance: Number(TransAmount) } },
-      { upsert: true }
-    );
-
-    console.log(`💰 Wallet credited: ${MSISDN} +${TransAmount}`);
-
-    return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-
-  } catch (err) {
-    console.error("❌ Confirmation error:", err.message);
-    return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
+  } catch (error) {
+    console.error("❌ Check balance error:", error.message);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
-/* ===============================
-   SEND MONEY (WALLET → WALLET)
-================================ */
-app.post("/api/send-money", async (req, res) => {
-  const { from, to, amount } = req.body;
-
-  const sender = await Wallet.findOne({ phone: from });
-  if (!sender || sender.balance < amount) {
-    return res.status(400).json({ error: "Insufficient balance" });
-  }
-
-  await Wallet.updateOne({ phone: from }, { $inc: { balance: -amount } });
-  await Wallet.updateOne(
-    { phone: to },
-    { $inc: { balance: amount } },
-    { upsert: true }
-  );
-
-  await Transaction.create([
-    { transId: Date.now() + from, phone: from, amount, type: "SEND", status: "completed" },
-    { transId: Date.now() + to, phone: to, amount, type: "RECEIVE", status: "completed" }
-  ]);
-
-  res.json({ success: true });
-});
-
-/* ===============================
-   START SERVER
-================================ */
+/* ---------------- START SERVER ---------------- */
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`🔥 Afri Smart Pay API running on port ${PORT}`);
 });
