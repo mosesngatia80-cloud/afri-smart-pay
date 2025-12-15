@@ -1,59 +1,71 @@
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
-import bodyParser from "body-parser";
 import dotenv from "dotenv";
 
-import paypalRoutes from "./routes/paypal.routes.js";
-import paypalTopupRoutes from "./routes/topup.paypal.routes.js";
-import transactionRoutes from "./routes/transactions.routes.js";
-
+// Load env
 dotenv.config();
 
 const app = express();
-
-// =============================
-// PAYPAL LIVE SAFETY CHECK
-// =============================
-if (
-  process.env.PAYPAL_MODE === "live" &&
-  (!process.env.PAYPAL_LIVE_CLIENT_ID ||
-    !process.env.PAYPAL_LIVE_CLIENT_SECRET)
-) {
-  console.error("❌ LIVE PayPal mode enabled without live credentials");
-  process.exit(1);
-}
-
-// =============================
-// MIDDLEWARE
-// =============================
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// =============================
-// MONGODB CONNECTION
-// =============================
+// ================================
+// MongoDB
+// ================================
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Error:", err.message));
 
-// =============================
+// ================================
 // ROUTES
-// =============================
+// ================================
+import paypalRoutes from "./routes/paypal.routes.js";
+import paypalTopupRoutes from "./routes/topup.paypal.routes.js";
+import paypalWebhookRoutes from "./routes/paypal.webhook.routes.js";
+import transactionRoutes from "./routes/transactions.routes.js";
+
+// PayPal core routes
 app.use("/api/paypal", paypalRoutes);
+app.use("/api/paypal", paypalWebhookRoutes);
+
+// PayPal top-up
 app.use("/api/topup/paypal", paypalTopupRoutes);
+
+// Wallet / Transactions
 app.use("/api/transactions", transactionRoutes);
 
-// HEALTH CHECK
+// ================================
+// Health Check
+// ================================
 app.get("/", (req, res) => {
   res.json({ status: "Afri Smart Pay API running" });
 });
 
-// =============================
-// SERVER START
-// =============================
+// ================================
+// Start Server
+// ================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Afri Smart Pay API running on port ${PORT}`);
+  console.log("🔔 PayPal Webhook listening at /api/paypal/webhook");
 });
+
+import mpesaRoutes from "./routes/mpesa.routes.js";
+app.use("/api/mpesa", mpesaRoutes);
+
+import sendMoneyRoutes from "./routes/sendMoney.routes.js";
+app.use("/api", sendMoneyRoutes);
+
+import checkBalanceRoutes from "./routes/checkBalance.routes.js";
+app.use("/api", checkBalanceRoutes);
+
+import walletRoutes from "./routes/wallet.routes.js";
+app.use("/api", walletRoutes);
+
+import withdrawRoutes from "./routes/withdraw.routes.js";
+app.use("/api", withdrawRoutes);
+
+import whatsappRoutes from "./routes/whatsapp.routes.js";
+app.use("/api", whatsappRoutes);
