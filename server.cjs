@@ -1,167 +1,172 @@
 const express = require("express");
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
 require("dotenv").config();
 
 const app = express();
 app.use(express.json());
 
-/* ================= DATABASE ================= */
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => console.error("❌ MongoDB Error:", err.message));
+/* ================= CONFIG ================= */
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "verify_token";
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 
-/* ================= MODELS ================= */
-const walletSchema = new mongoose.Schema({
-  phone: { type: String, unique: true },
-  balance: { type: Number, default: 0 },
-  pinHash: { type: String } // hashed PIN
-});
-
-const transactionSchema = new mongoose.Schema({
-  phone: String,
-  amount: Number,
-  type: String, // SEND | C2B_TOPUP
-  reference: String,
-  createdAt: { type: Date, default: Date.now }
-});
-
-const Wallet = mongoose.model("Wallet", walletSchema);
-const Transaction = mongoose.model("Transaction", transactionSchema);
+const SMART_PAY_BASE = "https://afri-smart-pay-v2.onrender.com";
 
 /* ================= HELPERS ================= */
-async function getOrCreateWallet(phone) {
-  let wallet = await Wallet.findOne({ phone });
-  if (!wallet) {
-    wallet = await Wallet.create({ phone, balance: 0 });
-  }
-  return wallet;
+function normalizePhone(phone) {
+  return phone.replace(/\+/g, "").trim();
 }
 
-/* ================= WALLET ROUTES ================= */
+async function safeJson(res) {
+  if (!res.ok) {
+    if (res.status === 429) {
+      return { success: false, error: "Too many requests. Please wait a few seconds." };
+    }
+    const text = await res.text();
+    return { success: false, error: text || "Service error" };
+  }
+  return res.json();
+}
 
-// Check balance
-app.post("/api/check-balance", async (req, res) => {
-  const { phone } = req.body;
-  const wallet = await getOrCreateWallet(phone);
-
-  res.json({
-    success: true,
-    phone,
-    balance: wallet.balance
+/* ================= SMART PAY CLIENT ================= */
+async function checkBalance(phone) {
+  const res = await fetch(`${SMART_PAY_BASE}/api/check-balance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone })
   });
-});
+  return safeJson(res);
+}
 
-/* ================= PIN SETUP ================= */
-
-// Set or change PIN
-app.post("/api/set-pin", async (req, res) => {
-  const { phone, pin } = req.body;
-
-  if (!pin || pin.length < 4) {
-    return res.json({ success: false, error: "PIN must be at least 4 digits" });
-  }
-
-  const wallet = await getOrCreateWallet(phone);
-  wallet.pinHash = await bcrypt.hash(pin, 10);
-  await wallet.save();
-
-  res.json({ success: true, message: "PIN set successfully" });
-});
-
-/* ================= SEND MONEY (PIN PROTECTED) ================= */
-
-app.post("/api/send-money", async (req, res) => {
-  const { from, to, amount, pin } = req.body;
-  const amt = Number(amount);
-
-  if (!from || !to || !pin || amt <= 0) {
-    return res.json({ success: false, error: "Invalid request" });
-  }
-
-  const sender = await getOrCreateWallet(from);
-  const receiver = await getOrCreateWallet(to);
-
-  if (!sender.pinHash) {
-    return res.json({
-      success: false,
-      error: "PIN not set. Please set PIN first."
-    });
-  }
-
-  const pinOk = await bcrypt.compare(pin, sender.pinHash);
-  if (!pinOk) {
-    return res.json({ success: false, error: "Invalid PIN" });
-  }
-
-  if (sender.balance < amt) {
-    return res.json({
-      success: false,
-      error: "Insufficient balance",
-      balance: sender.balance
-    });
-  }
-
-  sender.balance -= amt;
-  receiver.balance += amt;
-
-  await sender.save();
-  await receiver.save();
-
-  await Transaction.create({
-    phone: from,
-    amount: amt,
-    type: "SEND",
-    reference: `SEND-${Date.now()}`
+async function setPin(phone, pin) {
+  const res = await fetch(`${SMART_PAY_BASE}/api/set-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, pin })
   });
+  return safeJson(res);
+}
 
-  res.json({
-    success: true,
-    message: "Transfer successful",
-    from,
-    to,
-    balance: sender.balance
+async function sendMoney(from, to, amount, pin) {
+  const res = await fetch(`${SMART_PAY_BASE}/api/send-money`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to, amount, pin })
   });
+  return safeJson(res);
+}
+
+/* ================= WHATSAPP SEND ================= */
+async function sendWhatsAppMessage(to, text) {
+  const url = `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`;
+
+  await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      text: { body: text }
+    })
+  });
+}
+
+/* ================= MESSAGE LOGIC ================= */
+async function handleIncomingText(from, text) {
+  const phone = normalizePhone(from);
+  const msg = text.trim();
+
+  /* ----- SET PIN ----- */
+  const setPinMatch = msg.match(/^setpin\s+(\d{4,6})$/i);
+  if (setPinMatch) {
+    const pin = setPinMatch[1];
+    const result = await setPin(phone, pin);
+
+    if (!result.success) {
+      return `❌ ${result.error || "Failed to set PIN"}`;
+    }
+
+    return "✅ PIN set successfully.\nUse it when sending money:\nsend 50 to 2547XXXXXXXX pin 1234";
+  }
+
+  /* ----- BALANCE ----- */
+  if (/^balance$/i.test(msg)) {
+    const data = await checkBalance(phone);
+    if (!data.success) return `⚠️ ${data.error}`;
+    return `💰 Your balance is KES ${data.balance}`;
+  }
+
+  /* ----- SEND MONEY (WITH PIN) ----- */
+  const sendMatch = msg.match(/send\s+(\d+)\s+to\s+(\+?\d+)\s+pin\s+(\d{4,6})/i);
+  if (sendMatch) {
+    const amount = Number(sendMatch[1]);
+    const to = normalizePhone(sendMatch[2]);
+    const pin = sendMatch[3];
+
+    if (!/^2547\d{8}$/.test(to)) {
+      return "❌ Invalid phone number. Use format: 2547XXXXXXXX";
+    }
+
+    const result = await sendMoney(phone, to, amount, pin);
+
+    if (!result.success) {
+      return `❌ ${result.error}`;
+    }
+
+    return `✅ Sent KES ${amount} to ${to}\n💰 New balance: KES ${result.balance}`;
+  }
+
+  /* ----- HELP ----- */
+  return (
+    "🤖 Afri Smart Pay Commands\n\n" +
+    "• setpin 1234\n" +
+    "• balance\n" +
+    "• send 50 to 2547XXXXXXXX pin 1234"
+  );
+}
+
+/* ================= WEBHOOK VERIFY ================= */
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ Webhook verified");
+    return res.status(200).send(challenge);
+  }
+
+  return res.sendStatus(403);
 });
 
-/* ================= M-PESA C2B ================= */
-
-// Validation
-app.post("/api/mpesa/validation", (req, res) => {
-  console.log("📥 M-PESA VALIDATION:", req.body);
-  return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-});
-
-// Confirmation
-app.post("/api/mpesa/confirmation", async (req, res) => {
-  console.log("💰 M-PESA CONFIRMATION:", req.body);
-
+/* ================= WEBHOOK RECEIVE ================= */
+app.post("/webhook", async (req, res) => {
   try {
-    const { TransAmount, MSISDN, TransID } = req.body;
-    const phone = MSISDN;
-    const amount = Number(TransAmount);
+    const entry = req.body.entry?.[0];
+    const change = entry?.changes?.[0];
+    const message = change?.value?.messages?.[0];
 
-    const wallet = await getOrCreateWallet(phone);
-    wallet.balance += amount;
-    await wallet.save();
+    if (!message || !message.text) return res.sendStatus(200);
 
-    await Transaction.create({
-      phone,
-      amount,
-      type: "C2B_TOPUP",
-      reference: TransID
-    });
+    const from = message.from;
+    const text = message.text.body;
 
-    return res.json({ ResultCode: 0, ResultDesc: "Success" });
+    console.log("📩 Message:", from, text);
+
+    const reply = await handleIncomingText(from, text);
+    await sendWhatsAppMessage(from, reply);
+
+    res.sendStatus(200);
   } catch (err) {
-    console.error("❌ C2B ERROR:", err.message);
-    return res.json({ ResultCode: 1, ResultDesc: "Failed" });
+    console.error("❌ Webhook error:", err.message);
+    res.sendStatus(200);
   }
 });
 
-/* ================= SERVER ================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Afri Smart Pay API running on port ${PORT}`);
+  console.log(`🔥 Smart Connect running on port ${PORT}`);
 });
