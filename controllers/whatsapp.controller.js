@@ -1,106 +1,62 @@
-import axios from "axios";
+const axios = require("axios");
 
-const SMART_PAY_BASE = process.env.SMART_PAY_BASE || "http://localhost:3000/api";
+const SMART_PAY_BASE = process.env.SMART_PAY_BASE;
 
-// simple in-memory state (OK for v1 / demo)
-const pendingPin = new Map(); // phone -> { action, payload }
-
-export const handleWhatsAppMessage = async (req, res) => {
+module.exports = async function whatsappHandler(req, res) {
   try {
     const entry = req.body.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
+    const changes = entry?.changes?.[0];
+    const message = changes?.value?.messages?.[0];
 
-    const msg = value?.messages?.[0];
-    if (!msg || msg.type !== "text") return res.sendStatus(200);
+    if (!message) return res.sendStatus(200);
 
-    const from = msg.from; // e.g. 2547xxxxxxxx
-    const text = msg.text.body.trim().toLowerCase();
+    const from = message.from; // phone number (2547...)
+    const text = message.text?.body?.trim().toUpperCase();
 
-    // If waiting for PIN
-    if (pendingPin.has(from)) {
-      const pin = text;
-      const { action, payload } = pendingPin.get(from);
-      pendingPin.delete(from);
-
-      if (action === "send") {
-        const r = await axios.post(`${SMART_PAY_BASE}/send-money`, {
-          fromPhone: from,
-          toPhone: payload.to,
-          amount: payload.amount,
-          pin
-        });
-        return reply(value.metadata.phone_number_id, from,
-          `✅ Sent KES ${payload.amount}. Fee KES ${r.data.fee}.`
-        );
-      }
-
-      if (action === "withdraw") {
-        const r = await axios.post(`${SMART_PAY_BASE}/withdraw`, {
-          phone: from,
-          amount: payload.amount,
-          pin
-        });
-        return reply(value.metadata.phone_number_id, from,
-          `✅ Withdrawn KES ${payload.amount}. Fee KES ${r.data.fee}.`
-        );
-      }
-    }
-
-    // Commands
-    if (text === "help") {
-      return reply(value.metadata.phone_number_id, from,
-        "Commands:\n• balance\n• send 50 2547XXXXXXXX\n• withdraw 50"
+    // HISTORY command
+    if (text === "HISTORY") {
+      const response = await axios.get(
+        `${SMART_PAY_BASE}/transactions/${from}`
       );
-    }
 
-    if (text === "balance") {
-      const r = await axios.get(`${SMART_PAY_BASE}/check-balance/${from}`);
-      return reply(value.metadata.phone_number_id, from,
-        `💰 Your balance is KES ${r.data.balance}`
-      );
-    }
+      const transactions = response.data;
 
-    if (text.startsWith("send ")) {
-      const parts = text.split(" ");
-      if (parts.length !== 3) {
-        return reply(value.metadata.phone_number_id, from,
-          "Usage: send <amount> <phone>"
+      if (!transactions.length) {
+        return sendWhatsAppMessage(
+          from,
+          "You have no transactions yet."
         );
       }
-      const amount = Number(parts[1]);
-      const to = parts[2];
-      pendingPin.set(from, { action: "send", payload: { amount, to } });
-      return reply(value.metadata.phone_number_id, from, "🔐 Enter your PIN");
+
+      let reply = "Afri Smart Pay – Transaction History\n\n";
+
+      transactions.slice(0, 5).forEach(tx => {
+        const date = new Date(tx.date).toLocaleDateString();
+        reply += `${date}: +${tx.amount} KES (${tx.source})\n`;
+      });
+
+      return sendWhatsAppMessage(from, reply);
     }
 
-    if (text.startsWith("withdraw ")) {
-      const parts = text.split(" ");
-      if (parts.length !== 2) {
-        return reply(value.metadata.phone_number_id, from,
-          "Usage: withdraw <amount>"
-        );
-      }
-      const amount = Number(parts[1]);
-      pendingPin.set(from, { action: "withdraw", payload: { amount } });
-      return reply(value.metadata.phone_number_id, from, "🔐 Enter your PIN");
-    }
-
-    return reply(value.metadata.phone_number_id, from, "Type *help* to see commands");
-
-  } catch (err) {
-    console.error("❌ WHATSAPP ERROR:", err.response?.data || err.message);
+    // Default reply
+    return sendWhatsAppMessage(
+      from,
+      "Send BALANCE to check your wallet balance or HISTORY to see transactions."
+    );
+  } catch (error) {
+    console.error("❌ WhatsApp handler error:", error);
     return res.sendStatus(200);
   }
 };
 
-async function reply(phoneNumberId, to, body) {
+// Send WhatsApp message helper
+async function sendWhatsAppMessage(to, text) {
   await axios.post(
-    `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+    `https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`,
     {
       messaging_product: "whatsapp",
       to,
-      text: { body }
+      text: { body: text }
     },
     {
       headers: {
