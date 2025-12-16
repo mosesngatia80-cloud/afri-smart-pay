@@ -3,11 +3,12 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 
-// Routes
+// Load env
+dotenv.config();
+
+// Import routes
 const mpesaRoutes = require("./routes/mpesa.routes.js");
 const checkBalanceRoutes = require("./routes/checkBalance.routes.js");
-
-dotenv.config();
 
 const app = express();
 
@@ -15,21 +16,30 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check
+// ✅ Root health check (fixes "Cannot GET /")
 app.get("/", (req, res) => {
-  res.json({ status: "Afri Smart Pay running" });
+  res.json({
+    status: "OK",
+    service: "Afri Smart Pay API",
+    version: "v2",
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Daraja-safe C2B routes
+// ✅ M-PESA C2B routes
+// Example: /api/c2b/confirmation
 app.use("/api/c2b", mpesaRoutes);
 
-// Wallet / balance routes
+// ✅ Wallet / balance routes
+// Example: /check-balance/:phone
 app.use(checkBalanceRoutes);
 
 // MongoDB connection
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
+  .then(() => {
+    console.log("✅ MongoDB connected");
+  })
   .catch((err) => {
     console.error("❌ MongoDB connection error:", err.message);
     process.exit(1);
