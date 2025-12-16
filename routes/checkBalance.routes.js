@@ -1,8 +1,9 @@
-import express from "express";
-import { checkBalance } from "../controllers/checkBalance.controller.js";
-
+const express = require("express");
 const router = express.Router();
 
-router.get("/check-balance/:phone", checkBalance);
+const checkBalanceController = require("../controllers/checkBalance.controller.js");
 
-export default router;
+// GET /check-balance/:phone
+router.get("/check-balance/:phone", checkBalanceController);
+
+module.exports = router;
