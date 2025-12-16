@@ -4,31 +4,31 @@ const SMART_PAY_BASE = process.env.SMART_PAY_BASE;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
-module.exports = async function whatsappHandler(req, res) {
+module.exports = async (req, res) => {
   try {
     const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const message = changes?.value?.messages?.[0];
+    const change = entry?.changes?.[0];
+    const message = change?.value?.messages?.[0];
 
     if (!message) return res.sendStatus(200);
 
-    const from = message.from; // e.g. 2547XXXXXXXX
+    const from = message.from; // 2547XXXXXXXX
     const text = message.text?.body?.trim().toUpperCase();
 
-    // ================= BALANCE =================
+    // ========= BALANCE =========
     if (text === "BALANCE") {
       const r = await axios.get(
         `${SMART_PAY_BASE}/check-balance/${from}`
       );
 
-      const reply =
-        `Afri Smart Pay\n\nYour wallet balance is KES ${r.data.balance}.`;
-
-      await sendWhatsAppMessage(from, reply);
+      await sendMessage(
+        from,
+        `Afri Smart Pay\n\nYour wallet balance is KES ${r.data.balance}.`
+      );
       return res.sendStatus(200);
     }
 
-    // ================= HISTORY =================
+    // ========= HISTORY =========
     if (text === "HISTORY") {
       const r = await axios.get(
         `${SMART_PAY_BASE}/transactions/${from}`
@@ -37,35 +37,35 @@ module.exports = async function whatsappHandler(req, res) {
       const txs = r.data;
 
       if (!txs.length) {
-        await sendWhatsAppMessage(from, "You have no transactions yet.");
+        await sendMessage(from, "You have no transactions yet.");
         return res.sendStatus(200);
       }
 
       let reply = "Afri Smart Pay – Transaction History\n\n";
-
       txs.slice(0, 5).forEach(tx => {
         const d = new Date(tx.date).toLocaleDateString();
         reply += `${d}: +${tx.amount} KES (${tx.source})\n`;
       });
 
-      await sendWhatsAppMessage(from, reply);
+      await sendMessage(from, reply);
       return res.sendStatus(200);
     }
 
-    // ================= HELP =================
-    await sendWhatsAppMessage(
+    // ========= HELP =========
+    await sendMessage(
       from,
-      "Welcome to Afri Smart Pay.\n\nSend:\nBALANCE – check wallet balance\nHISTORY – view transactions"
+      "Welcome to Afri Smart Pay.\n\nSend:\nBALANCE – check wallet\nHISTORY – view transactions"
     );
+
     return res.sendStatus(200);
 
-  } catch (error) {
-    console.error("❌ WhatsApp handler error:", error.message);
+  } catch (err) {
+    console.error("❌ WhatsApp error:", err.message);
     return res.sendStatus(200);
   }
 };
 
-async function sendWhatsAppMessage(to, text) {
+async function sendMessage(to, text) {
   await axios.post(
     `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`,
     {

@@ -1,9 +1,9 @@
-import express from "express";
-import { handleWhatsAppMessage } from "../controllers/whatsapp.controller.js";
-
+const express = require("express");
 const router = express.Router();
 
-// webhook receiver
-router.post("/whatsapp/webhook", handleWhatsAppMessage);
+const whatsappController = require("../controllers/whatsapp.controller.js");
 
-export default router;
+// WhatsApp webhook receiver
+router.post("/whatsapp/webhook", whatsappController);
+
+module.exports = router;
