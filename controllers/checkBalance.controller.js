@@ -1,6 +1,6 @@
-import Wallet from "../models/Wallet.js";
+const Wallet = require("../models/Wallet"); // adjust if your model path differs
 
-export const checkBalance = async (req, res) => {
+module.exports = async function checkBalance(req, res) {
   try {
     const { phone } = req.params;
 
@@ -12,11 +12,10 @@ export const checkBalance = async (req, res) => {
 
     return res.json({
       phone: wallet.phone,
-      balance: wallet.balance
+      balance: wallet.balance,
     });
-
   } catch (error) {
-    console.error("❌ CHECK BALANCE ERROR:", error);
-    return res.status(500).json({ message: "Server error" });
+    console.error("Check balance error:", error);
+    res.status(500).json({ message: "Server error" });
   }
 };
