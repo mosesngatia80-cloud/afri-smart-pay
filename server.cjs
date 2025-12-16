@@ -20,7 +20,7 @@ app.get("/", (req, res) => {
   res.json({ status: "Afri Smart Pay running" });
 });
 
-// Daraja-safe C2B routes (NO 'mpesa' in URL)
+// Daraja-safe C2B routes
 app.use("/api/c2b", mpesaRoutes);
 
 // Wallet / balance routes
