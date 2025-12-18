@@ -1,71 +1,42 @@
-import Wallet from "../models/Wallet.js";
-import Transaction from "../models/Transaction.js";
-import bcrypt from "bcryptjs";
+const Wallet = require("../models/Wallet");
+const Transaction = require("../models/Transaction");
 
-const SEND_MONEY_FEE = 10; // KES
-
-export const sendMoney = async (req, res) => {
+const sendMoney = async (req, res) => {
   try {
-    const { fromPhone, toPhone, amount, pin } = req.body;
+    const { from, to, amount } = req.body;
 
-    if (!fromPhone || !toPhone || !amount || !pin) {
-      return res.status(400).json({ message: "Missing required fields" });
+    if (!from || !to || !amount) {
+      return res.status(400).json({ message: "Missing fields" });
     }
 
-    const sender = await Wallet.findOne({ phone: fromPhone });
-    const receiver = await Wallet.findOne({ phone: toPhone });
+    const sender = await Wallet.findOne({ phone: from });
+    const receiver = await Wallet.findOne({ phone: to });
 
     if (!sender || !receiver) {
       return res.status(404).json({ message: "Wallet not found" });
     }
 
-    // 🔐 Verify PIN
-    const pinMatch = await bcrypt.compare(pin, sender.pin);
-    if (!pinMatch) {
-      return res.status(401).json({ message: "Invalid PIN" });
-    }
-
-    const totalDebit = Number(amount) + SEND_MONEY_FEE;
-
-    if (sender.balance < totalDebit) {
+    if (sender.balance < amount) {
       return res.status(400).json({ message: "Insufficient balance" });
     }
 
-    // 💸 Move money
-    sender.balance -= totalDebit;
-    receiver.balance += Number(amount);
+    sender.balance -= amount;
+    receiver.balance += amount;
 
     await sender.save();
     await receiver.save();
 
-    // 🧾 Transaction: Send money
     await Transaction.create({
-      wallet: sender._id,
-      type: "SEND_MONEY",
-      amount: Number(amount),
-      reference: `SEND_${Date.now()}`,
-      phone: toPhone,
-      status: "SUCCESS"
+      phone: from,
+      amount,
+      type: "SEND",
     });
 
-    // 💰 Transaction: Fee
-    await Transaction.create({
-      wallet: sender._id,
-      type: "FEE",
-      amount: SEND_MONEY_FEE,
-      reference: `FEE_${Date.now()}`,
-      status: "SUCCESS"
-    });
-
-    return res.json({
-      message: "Transfer successful",
-      sent: amount,
-      fee: SEND_MONEY_FEE,
-      totalDebited: totalDebit
-    });
-
-  } catch (error) {
-    console.error("❌ SEND MONEY ERROR:", error);
-    return res.status(500).json({ message: "Server error" });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };
+
+module.exports = sendMoney;

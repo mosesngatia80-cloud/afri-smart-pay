@@ -1,51 +1,46 @@
+require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
-const cors = require("cors");
-const dotenv = require("dotenv");
-
-// Load env
-dotenv.config();
-
-// Import routes
-const mpesaRoutes = require("./routes/mpesa.routes.js");
-const checkBalanceRoutes = require("./routes/checkBalance.routes.js");
-const transactionsRoutes = require("./routes/transactions.routes.js");
 
 const app = express();
-
-// Middleware
-app.use(cors());
 app.use(express.json());
 
-// Health check
-app.get("/", (req, res) => {
-  res.json({
-    status: "OK",
-    service: "Afri Smart Pay API",
-    version: "v2"
-  });
-});
+// ------------------ MongoDB ------------------
+if (!process.env.MONGO_URI) {
+  console.error("❌ MONGO_URI is missing in .env");
+  process.exit(1);
+}
 
-// M-PESA C2B routes
-app.use("/api/c2b", mpesaRoutes);
-
-// Wallet routes
-app.use(checkBalanceRoutes);
-
-// ✅ Transactions routes (THIS WAS MISSING)
-app.use(transactionsRoutes);
-
-// MongoDB connection
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => {
-    console.error("❌ MongoDB connection error:", err.message);
+    console.error("❌ MongoDB error", err);
     process.exit(1);
   });
 
-// Start server
-const PORT = process.env.PORT || 10000;
+// ------------------ Routes ------------------
+function mount(path, route) {
+  if (typeof route === "function") {
+    app.use(path, route);
+    console.log(`✅ Mounted ${path}`);
+  } else {
+    console.log(`⚠️ Skipped ${path} (not a valid router)`);
+  }
+}
+
+mount("/api", require("./routes/checkBalance.routes"));
+mount("/api", require("./routes/wallet.routes"));
+mount("/api", require("./routes/sendMoney.routes"));
+mount("/api", require("./routes/withdraw.routes"));
+mount("/api", require("./routes/transactions.routes"));
+mount("/api", require("./routes/mpesa.routes"));
+mount("/api", require("./routes/paypal.routes"));
+mount("/api", require("./routes/paypal.webhook.routes"));
+mount("/api", require("./routes/whatsapp.routes"));
+
+// ------------------ Start Server ------------------
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Afri Smart Pay API running on port ${PORT}`);
+  console.log(`🚀 Afri Smart Pay running on port ${PORT}`);
 });

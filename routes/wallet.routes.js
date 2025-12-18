@@ -1,8 +1,10 @@
-import express from "express";
-import { createWallet } from "../controllers/createWallet.controller.js";
-
+const express = require("express");
 const router = express.Router();
 
-router.post("/create-wallet", createWallet);
+const {
+  createWallet
+} = require("../controllers/createWallet.controller");
 
-export default router;
+router.post("/create", createWallet);
+
+module.exports = router;

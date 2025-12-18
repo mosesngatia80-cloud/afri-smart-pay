@@ -1,8 +1,8 @@
-import express from "express";
-import { withdraw } from "../controllers/withdraw.controller.js";
+const express = require("express");
+const withdraw = require("../controllers/withdraw.controller");
 
 const router = express.Router();
 
 router.post("/withdraw", withdraw);
 
-export default router;
+module.exports = router;

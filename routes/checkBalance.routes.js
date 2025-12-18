@@ -1,9 +1,8 @@
 const express = require("express");
+const { checkBalance } = require("../controllers/checkBalance.controller");
+
 const router = express.Router();
 
-const checkBalanceController = require("../controllers/checkBalance.controller.js");
-
-// GET /check-balance/:phone
-router.get("/check-balance/:phone", checkBalanceController);
+router.get("/check-balance/:phone", checkBalance);
 
 module.exports = router;

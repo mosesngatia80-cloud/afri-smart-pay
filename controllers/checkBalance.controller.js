@@ -1,11 +1,11 @@
-const Wallet = require("../models/Wallet.js");
+const Wallet = require("../models/Wallet");
 
-module.exports = async function checkBalance(req, res) {
+async function checkBalance(req, res) {
   try {
     const { phone } = req.params;
 
     if (!phone) {
-      return res.status(400).json({ message: "Phone is required" });
+      return res.status(400).json({ message: "Phone number is required" });
     }
 
     const wallet = await Wallet.findOne({ phone });
@@ -16,10 +16,12 @@ module.exports = async function checkBalance(req, res) {
 
     return res.json({
       phone: wallet.phone,
-      balance: wallet.balance || 0
+      balance: wallet.balance,
     });
-  } catch (error) {
-    console.error("❌ Check balance error:", error);
+  } catch (err) {
+    console.error("Check balance error:", err);
     return res.status(500).json({ message: "Server error" });
   }
-};
+}
+
+module.exports = { checkBalance };
