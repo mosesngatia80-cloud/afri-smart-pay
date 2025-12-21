@@ -4,29 +4,18 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-// ===============================
-// ROUTE IMPORTS (MUST EXPORT router)
-// ===============================
+// ===== PORT =====
+const PORT = process.env.PORT || 10000;
+
+// ===== ROUTES (IMPORT DEFAULT EXPORTS ONLY) =====
 const walletRoutes = require("./routes/wallet.routes");
 const sendMoneyRoutes = require("./routes/sendMoney.routes");
-const withdrawRoutes = require("./routes/withdraw.routes");
 const mpesaRoutes = require("./routes/mpesa.routes");
+const withdrawRoutes = require("./routes/withdraw.routes");
 const paypalRoutes = require("./routes/paypal.routes");
 const paypalWebhookRoutes = require("./routes/paypal.webhook.routes");
 
-// ===============================
-// ROUTE MOUNTING
-// ===============================
-app.use("/api/wallet", walletRoutes);
-app.use("/api/send-money", sendMoneyRoutes);
-app.use("/api/withdraw", withdrawRoutes);
-app.use("/api/mpesa", mpesaRoutes);
-app.use("/api/paypal", paypalRoutes);
-app.use("/api", paypalWebhookRoutes);
-
-// ===============================
-// HEALTH CHECK
-// ===============================
+// ===== HEALTH CHECK =====
 app.get("/", (req, res) => {
   res.json({
     status: "OK",
@@ -35,10 +24,20 @@ app.get("/", (req, res) => {
   });
 });
 
-// ===============================
-// START SERVER
-// ===============================
-const PORT = process.env.PORT || 10000;
+// ===== MOUNT ROUTES (VERY IMPORTANT) =====
+app.use("/api/wallet", walletRoutes);
+app.use("/api/send-money", sendMoneyRoutes);
+app.use("/api/mpesa", mpesaRoutes);
+app.use("/api/withdraw", withdrawRoutes);
+app.use("/api/paypal", paypalRoutes);
+app.use("/api", paypalWebhookRoutes);
+
+// ===== 404 HANDLER =====
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+// ===== START SERVER =====
 app.listen(PORT, () => {
   console.log(`🚀 Afri Smart Pay v2 running on port ${PORT}`);
 });
