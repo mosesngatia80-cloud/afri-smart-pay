@@ -1,43 +1,64 @@
-const express = require("express");
-require("dotenv").config();
+import express from "express";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
+
+/* ===============================
+   MIDDLEWARE
+================================ */
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ===== PORT =====
-const PORT = process.env.PORT || 10000;
-
-// ===== ROUTES (IMPORT DEFAULT EXPORTS ONLY) =====
-const walletRoutes = require("./routes/wallet.routes");
-const sendMoneyRoutes = require("./routes/sendMoney.routes");
-const mpesaRoutes = require("./routes/mpesa.routes");
-const withdrawRoutes = require("./routes/withdraw.routes");
-const paypalRoutes = require("./routes/paypal.routes");
-const paypalWebhookRoutes = require("./routes/paypal.webhook.routes");
-
-// ===== HEALTH CHECK =====
+/* ===============================
+   HEALTH CHECK
+================================ */
 app.get("/", (req, res) => {
-  res.json({
-    status: "OK",
-    service: "Afri Smart Pay API",
-    version: "v2",
+  res.send("Afri Smart Pay API is running 🚀");
+});
+
+/* ===============================
+   M-PESA C2B CALLBACK ROUTES
+   (THIS IS WHAT SAFARICOM NEEDS)
+================================ */
+
+// VALIDATION URL
+app.post("/api/mpesa/validation", (req, res) => {
+  console.log("🔔 M-PESA VALIDATION CALLBACK RECEIVED");
+  console.log(JSON.stringify(req.body, null, 2));
+
+  return res.json({
+    ResultCode: 0,
+    ResultDesc: "Accepted"
   });
 });
 
-// ===== MOUNT ROUTES (VERY IMPORTANT) =====
-app.use("/api/wallet", walletRoutes);
-app.use("/api/send-money", sendMoneyRoutes);
-app.use("/api/mpesa", mpesaRoutes);
-app.use("/api/withdraw", withdrawRoutes);
-app.use("/api/paypal", paypalRoutes);
-app.use("/api", paypalWebhookRoutes);
+// CONFIRMATION URL
+app.post("/api/mpesa/confirmation", (req, res) => {
+  console.log("✅ M-PESA CONFIRMATION CALLBACK RECEIVED");
+  console.log(JSON.stringify(req.body, null, 2));
 
-// ===== 404 HANDLER =====
-app.use((req, res) => {
-  res.status(404).json({ error: "Route not found" });
+  return res.json({
+    ResultCode: 0,
+    ResultDesc: "Success"
+  });
 });
 
-// ===== START SERVER =====
+// OPTIONAL: Allow GET for browser/manual testing
+app.get("/api/mpesa/validation", (req, res) => {
+  res.json({ status: "validation endpoint live" });
+});
+
+app.get("/api/mpesa/confirmation", (req, res) => {
+  res.json({ status: "confirmation endpoint live" });
+});
+
+/* ===============================
+   START SERVER
+================================ */
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(`🚀 Afri Smart Pay v2 running on port ${PORT}`);
+  console.log(`🚀 Afri Smart Pay running on port ${PORT}`);
 });
