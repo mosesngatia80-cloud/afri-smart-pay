@@ -1,31 +1,28 @@
 import express from "express";
-import dotenv from "dotenv";
-
-dotenv.config();
+import cors from "cors";
 
 const app = express();
 
-/* ===============================
+/* =======================
    MIDDLEWARE
-================================ */
+======================= */
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-/* ===============================
+/* =======================
    HEALTH CHECK
-================================ */
+======================= */
 app.get("/", (req, res) => {
-  res.send("Afri Smart Pay API is running 🚀");
+  res.status(200).send("Afri Smart Pay API is running");
 });
 
-/* ===============================
-   M-PESA C2B CALLBACK ROUTES
-   (THIS IS WHAT SAFARICOM NEEDS)
-================================ */
+/* =======================
+   M-PESA CALLBACKS
+======================= */
 
 // VALIDATION URL
 app.post("/api/mpesa/validation", (req, res) => {
-  console.log("🔔 M-PESA VALIDATION CALLBACK RECEIVED");
+  console.log("🔔 M-PESA VALIDATION CALLBACK");
   console.log(JSON.stringify(req.body, null, 2));
 
   return res.json({
@@ -36,27 +33,27 @@ app.post("/api/mpesa/validation", (req, res) => {
 
 // CONFIRMATION URL
 app.post("/api/mpesa/confirmation", (req, res) => {
-  console.log("✅ M-PESA CONFIRMATION CALLBACK RECEIVED");
+  console.log("🔔 M-PESA CONFIRMATION CALLBACK");
   console.log(JSON.stringify(req.body, null, 2));
 
   return res.json({
     ResultCode: 0,
-    ResultDesc: "Success"
+    ResultDesc: "Accepted"
   });
 });
 
-// OPTIONAL: Allow GET for browser/manual testing
-app.get("/api/mpesa/validation", (req, res) => {
-  res.json({ status: "validation endpoint live" });
+/* =======================
+   FALLBACK
+======================= */
+app.use((req, res) => {
+  res.status(404).json({
+    error: "Route not found"
+  });
 });
 
-app.get("/api/mpesa/confirmation", (req, res) => {
-  res.json({ status: "confirmation endpoint live" });
-});
-
-/* ===============================
+/* =======================
    START SERVER
-================================ */
+======================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
