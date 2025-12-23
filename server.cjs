@@ -1,6 +1,6 @@
-import express from "express";
-import cors from "cors";
-import bodyParser from "body-parser";
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
 
 const app = express();
 
@@ -27,7 +27,7 @@ const validationHandler = (req, res) => {
   console.log("✅ M-PESA VALIDATION RECEIVED");
   return res.json({
     ResultCode: 0,
-    ResultDesc: "Accepted"
+    ResultDesc: "Accepted",
   });
 };
 
@@ -35,19 +35,17 @@ const confirmationHandler = (req, res) => {
   console.log("✅ M-PESA CONFIRMATION RECEIVED");
   return res.json({
     ResultCode: 0,
-    ResultDesc: "Accepted"
+    ResultDesc: "Accepted",
   });
 };
 
 /* ===============================
    ACCEPT ALL COMMON CALLBACK PATHS
 ================================ */
-
-/* Preferred paths */
 app.post("/api/mpesa/validation", validationHandler);
 app.post("/api/mpesa/confirmation", confirmationHandler);
 
-/* Compatibility paths (Safaricom variations) */
+// Compatibility paths
 app.post("/mpesa/validation", validationHandler);
 app.post("/mpesa/confirmation", confirmationHandler);
 app.post("/validation", validationHandler);
@@ -61,7 +59,7 @@ app.get("/", (req, res) => {
 });
 
 /* ===============================
-   FALLBACK (LAST)
+   FALLBACK
 ================================ */
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
