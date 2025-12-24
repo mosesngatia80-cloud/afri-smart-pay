@@ -1,74 +1,70 @@
-const express = require("express");
-const cors = require("cors");
-const bodyParser = require("body-parser");
+import express from "express";
+import mongoose from "mongoose";
+import cors from "cors";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 
-/* ===============================
-   BASIC MIDDLEWARE
-================================ */
+/* =========================
+   MIDDLEWARE
+========================= */
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
 
-/* ===============================
-   LOG ALL INCOMING REQUESTS
-================================ */
-app.use((req, res, next) => {
-  console.log("➡️ INCOMING:", req.method, req.originalUrl);
-  console.log("📦 BODY:", JSON.stringify(req.body, null, 2));
-  next();
+/* =========================
+   DATABASE
+========================= */
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => {
+    console.error("❌ MongoDB error:", err.message);
+    process.exit(1);
+  });
+
+/* =========================
+   C2B CALLBACK ROUTES
+   (DARJA COMPLIANT – NO 'mpesa')
+========================= */
+
+// VALIDATION
+app.post("/api/c2b/validation", (req, res) => {
+  console.log("📥 C2B VALIDATION RECEIVED");
+  console.log(JSON.stringify(req.body, null, 2));
+
+  return res.json({
+    ResultCode: 0,
+    ResultDesc: "Accepted"
+  });
 });
 
-/* ===============================
-   M-PESA CALLBACK HANDLERS
-================================ */
-const validationHandler = (req, res) => {
-  console.log("✅ M-PESA VALIDATION RECEIVED");
+// CONFIRMATION
+app.post("/api/c2b/confirmation", (req, res) => {
+  console.log("📥 C2B CONFIRMATION RECEIVED");
+  console.log(JSON.stringify(req.body, null, 2));
+
+  // TODO: save transaction, credit wallet, link to Smart Biz order
+
   return res.json({
     ResultCode: 0,
-    ResultDesc: "Accepted",
+    ResultDesc: "Accepted"
   });
-};
+});
 
-const confirmationHandler = (req, res) => {
-  console.log("✅ M-PESA CONFIRMATION RECEIVED");
-  return res.json({
-    ResultCode: 0,
-    ResultDesc: "Accepted",
-  });
-};
-
-/* ===============================
-   ACCEPT ALL COMMON CALLBACK PATHS
-================================ */
-app.post("/api/mpesa/validation", validationHandler);
-app.post("/api/mpesa/confirmation", confirmationHandler);
-
-// Compatibility paths
-app.post("/mpesa/validation", validationHandler);
-app.post("/mpesa/confirmation", confirmationHandler);
-app.post("/validation", validationHandler);
-app.post("/confirmation", confirmationHandler);
-
-/* ===============================
+/* =========================
    HEALTH CHECK
-================================ */
+========================= */
 app.get("/", (req, res) => {
-  res.send("✅ Afri Smart Pay API is LIVE");
+  res.send("Afri Smart Pay API is running");
 });
 
-/* ===============================
-   FALLBACK
-================================ */
-app.use((req, res) => {
-  res.status(404).json({ error: "Route not found" });
-});
-
-/* ===============================
-   START SERVER
-================================ */
+/* =========================
+   SERVER START
+========================= */
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Afri Smart Pay running on port ${PORT}`);
 });
