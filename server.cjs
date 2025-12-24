@@ -1,9 +1,7 @@
-import express from "express";
-import mongoose from "mongoose";
-import cors from "cors";
-import dotenv from "dotenv";
-
-dotenv.config();
+require("dotenv").config();
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
 
 const app = express();
 
@@ -45,7 +43,7 @@ app.post("/api/c2b/confirmation", (req, res) => {
   console.log("📥 C2B CONFIRMATION RECEIVED");
   console.log(JSON.stringify(req.body, null, 2));
 
-  // TODO: save transaction, credit wallet, link to Smart Biz order
+  // TODO: save transaction, credit wallet, link Smart Biz order
 
   return res.json({
     ResultCode: 0,
