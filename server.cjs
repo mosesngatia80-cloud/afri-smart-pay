@@ -23,32 +23,36 @@ mongoose
   });
 
 /* =========================
-   C2B CALLBACK ROUTES
-   (DARJA COMPLIANT – NO 'mpesa')
+   ROUTES IMPORT
 ========================= */
+const walletRoutes = require("./routes/wallet.routes");
+const sendMoneyRoutes = require("./routes/sendMoney.routes");
+const checkBalanceRoutes = require("./routes/checkBalance.routes");
+const transactionsRoutes = require("./routes/transactions.routes");
 
-// VALIDATION
+/* =========================
+   API ROUTES
+========================= */
+app.use("/api", walletRoutes);
+app.use("/api", sendMoneyRoutes);
+app.use("/api", checkBalanceRoutes);
+app.use("/api", transactionsRoutes);
+
+console.log("🔥 API routes mounted: wallet, send-money, balance, transactions");
+
+/* =========================
+   C2B CALLBACK ROUTES
+========================= */
 app.post("/api/c2b/validation", (req, res) => {
   console.log("📥 C2B VALIDATION RECEIVED");
   console.log(JSON.stringify(req.body, null, 2));
-
-  return res.json({
-    ResultCode: 0,
-    ResultDesc: "Accepted"
-  });
+  return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 });
 
-// CONFIRMATION
 app.post("/api/c2b/confirmation", (req, res) => {
   console.log("📥 C2B CONFIRMATION RECEIVED");
   console.log(JSON.stringify(req.body, null, 2));
-
-  // TODO: save transaction, credit wallet, link Smart Biz order
-
-  return res.json({
-    ResultCode: 0,
-    ResultDesc: "Accepted"
-  });
+  return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 });
 
 /* =========================
@@ -62,7 +66,6 @@ app.get("/", (req, res) => {
    SERVER START
 ========================= */
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
   console.log(`🚀 Afri Smart Pay running on port ${PORT}`);
 });
