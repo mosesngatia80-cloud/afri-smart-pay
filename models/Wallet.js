@@ -11,6 +11,14 @@ const walletSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    pin: {
+      type: String,
+      select: false, // hide by default
+    },
+    transactions: {
+      type: Array,
+      default: [],
+    },
   },
   { timestamps: true }
 );
