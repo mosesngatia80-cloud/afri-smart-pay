@@ -1,6 +1,6 @@
-import express from "express";
-import mongoose from "mongoose";
-import dotenv from "dotenv";
+const express = require("express");
+const mongoose = require("mongoose");
+const dotenv = require("dotenv");
 
 dotenv.config();
 
@@ -46,7 +46,7 @@ app.post("/api/c2b/validation", (req, res) => {
   console.log("🟢 C2B VALIDATION RECEIVED");
   console.log(JSON.stringify(req.body, null, 2));
 
-  return res.json({
+  res.json({
     ResultCode: 0,
     ResultDesc: "Accepted"
   });
@@ -67,32 +67,27 @@ app.post("/api/c2b/confirmation", async (req, res) => {
       return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
     }
 
-    // Normalize phone
     const phone = MSISDN.startsWith("254")
       ? MSISDN
       : "254" + MSISDN.slice(-9);
 
     const amount = Number(TransAmount);
 
-    // Prevent double credit
     const existingTx = await Transaction.findOne({ transId: TransID });
     if (existingTx) {
       console.log("⚠️ Duplicate transaction ignored:", TransID);
       return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
     }
 
-    // Find or create wallet
     let wallet = await Wallet.findOne({ phone });
     if (!wallet) {
       wallet = await Wallet.create({ phone, balance: 0 });
       console.log("🆕 Wallet created for", phone);
     }
 
-    // Credit wallet
     wallet.balance += amount;
     await wallet.save();
 
-    // Save transaction
     await Transaction.create({
       transId: TransID,
       phone,
@@ -102,17 +97,11 @@ app.post("/api/c2b/confirmation", async (req, res) => {
 
     console.log(`✅ Wallet credited: ${phone} +${amount}`);
 
-    return res.json({
-      ResultCode: 0,
-      ResultDesc: "Accepted"
-    });
+    res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 
   } catch (err) {
     console.error("❌ C2B ERROR:", err.message);
-    return res.json({
-      ResultCode: 0,
-      ResultDesc: "Accepted"
-    });
+    res.json({ ResultCode: 0, ResultDesc: "Accepted" });
   }
 });
 
