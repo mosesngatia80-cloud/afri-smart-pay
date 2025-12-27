@@ -7,7 +7,8 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-// 🔥 GLOBAL REQUEST LOGGER
+// =======================
+// GLOBAL REQUEST LOGGER
 app.use((req, res, next) => {
   console.log("🔥 INCOMING REQUEST:", req.method, req.path);
   next();
@@ -15,19 +16,20 @@ app.use((req, res, next) => {
 
 // =======================
 // DATABASE
-mongoose.connect(process.env.MONGO_URI)
+mongoose
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
-  .catch(err => console.error("❌ MongoDB error:", err.message));
+  .catch((err) => console.error("❌ MongoDB error:", err.message));
 
 // =======================
 // MODELS
 const walletSchema = new mongoose.Schema({
   phone: { type: String, unique: true },
-  balance: { type: Number, default: 0 }
+  balance: { type: Number, default: 0 },
 });
 
 const transactionSchema = new mongoose.Schema({
-  transId: { type: String, unique: true }
+  transId: { type: String, unique: true },
 });
 
 const Wallet = mongoose.model("Wallet", walletSchema);
@@ -41,7 +43,7 @@ app.post("/api/c2b/validation", (req, res) => {
 
   res.json({
     ResultCode: 0,
-    ResultDesc: "Accepted"
+    ResultDesc: "Accepted",
   });
 });
 
@@ -52,21 +54,17 @@ app.post("/api/c2b/confirmation", async (req, res) => {
   console.log(req.body);
 
   try {
-    const {
-      TransID,
-      TransAmount,
-      MSISDN
-    } = req.body;
+    const { TransID, TransAmount, MSISDN } = req.body;
 
     if (!TransID || !TransAmount || !MSISDN) {
-      console.log("❌ Missing fields");
+      console.log("❌ Missing required fields");
       return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
     }
 
     // 🛑 Prevent duplicate credit
-    const exists = await Transaction.findOne({ transId: TransID });
-    if (exists) {
-      console.log("⚠️ Duplicate transaction:", TransID);
+    const existingTx = await Transaction.findOne({ transId: TransID });
+    if (existingTx) {
+      console.log("⚠️ Duplicate transaction ignored:", TransID);
       return res.json({ ResultCode: 0, ResultDesc: "Duplicate" });
     }
 
@@ -75,7 +73,7 @@ app.post("/api/c2b/confirmation", async (req, res) => {
     if (!wallet) {
       wallet = await Wallet.create({
         phone: MSISDN,
-        balance: 0
+        balance: 0,
       });
       console.log("🆕 Wallet created for", MSISDN);
     }
@@ -90,17 +88,36 @@ app.post("/api/c2b/confirmation", async (req, res) => {
     console.log("✅ Wallet credited:", {
       phone: MSISDN,
       amount: TransAmount,
-      newBalance: wallet.balance
+      newBalance: wallet.balance,
     });
 
     res.json({
       ResultCode: 0,
-      ResultDesc: "Accepted"
+      ResultDesc: "Accepted",
     });
-
   } catch (err) {
     console.error("❌ Confirmation error:", err.message);
     res.json({ ResultCode: 0, ResultDesc: "Accepted" });
+  }
+});
+
+// =======================
+// CHECK WALLET BALANCE (INTERNAL)
+app.get("/api/wallet/:phone", async (req, res) => {
+  try {
+    const phone = req.params.phone;
+    const wallet = await Wallet.findOne({ phone });
+
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet not found" });
+    }
+
+    res.json({
+      phone: wallet.phone,
+      balance: wallet.balance,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
