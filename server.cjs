@@ -15,7 +15,7 @@ app.use(express.json());
 /* ================= DATABASE ================= */
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Smart Pay MongoDB connected"))
+  .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB error:", err.message));
 
 /* ================= MODELS ================= */
@@ -38,7 +38,7 @@ const Transaction = mongoose.model("Transaction", TransactionSchema);
 
 /* ================= WALLET ROUTES ================= */
 
-/* CREATE WALLET */
+/* Create wallet (idempotent) */
 app.post("/api/wallet/create", async (req, res) => {
   try {
     const { owner } = req.body;
@@ -46,15 +46,17 @@ app.post("/api/wallet/create", async (req, res) => {
       return res.status(400).json({ message: "Owner is required" });
     }
 
-    const existing = await Wallet.findOne({ owner });
-    if (existing) {
+    let wallet = await Wallet.findOne({ owner });
+
+    if (wallet) {
       return res.json({
         message: "Wallet already exists",
-        wallet: existing
+        wallet
       });
     }
 
-    const wallet = await Wallet.create({ owner });
+    wallet = await Wallet.create({ owner });
+
     res.json({
       message: "Wallet created",
       wallet
@@ -63,6 +65,20 @@ app.post("/api/wallet/create", async (req, res) => {
   } catch (err) {
     console.error("❌ Wallet create error:", err.message);
     res.status(500).json({ message: "Wallet creation failed" });
+  }
+});
+
+/* Get wallet by owner */
+app.get("/api/wallet/:owner", async (req, res) => {
+  try {
+    const wallet = await Wallet.findOne({ owner: req.params.owner });
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet not found" });
+    }
+
+    res.json(wallet);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching wallet" });
   }
 });
 
@@ -115,8 +131,8 @@ async function sendMoney(req, res) {
 }
 
 /* ================= TRANSFER ROUTES ================= */
-app.post("/api/send-money", sendMoney);
 app.post("/api/wallet/send", sendMoney);
+app.post("/api/send-money", sendMoney);
 app.post("/api/transfer", sendMoney);
 
 /* ================= HEALTH ================= */
