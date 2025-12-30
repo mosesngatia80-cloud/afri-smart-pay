@@ -4,6 +4,8 @@ const cors = require("cors");
 require("dotenv").config();
 
 const app = express();
+
+/* ================= CONFIG ================= */
 const PORT = process.env.PORT || 3000;
 
 /* ================= MIDDLEWARE ================= */
@@ -13,13 +15,14 @@ app.use(express.json());
 /* ================= DATABASE ================= */
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch(err => console.error("❌ MongoDB error:", err.message));
+  .then(() => console.log("✅ Smart Pay MongoDB connected"))
+  .catch((err) => console.error("❌ MongoDB error:", err.message));
 
 /* ================= MODELS ================= */
 const WalletSchema = new mongoose.Schema({
   owner: { type: String, unique: true },
-  balance: { type: Number, default: 0 }
+  balance: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
 });
 
 const TransactionSchema = new mongoose.Schema({
@@ -33,20 +36,56 @@ const TransactionSchema = new mongoose.Schema({
 const Wallet = mongoose.model("Wallet", WalletSchema);
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 
-/* ================= CORE LOGIC ================= */
+/* ================= WALLET ROUTES ================= */
+
+/* CREATE WALLET */
+app.post("/api/wallet/create", async (req, res) => {
+  try {
+    const { owner } = req.body;
+    if (!owner) {
+      return res.status(400).json({ message: "Owner is required" });
+    }
+
+    const existing = await Wallet.findOne({ owner });
+    if (existing) {
+      return res.json({
+        message: "Wallet already exists",
+        wallet: existing
+      });
+    }
+
+    const wallet = await Wallet.create({ owner });
+    res.json({
+      message: "Wallet created",
+      wallet
+    });
+
+  } catch (err) {
+    console.error("❌ Wallet create error:", err.message);
+    res.status(500).json({ message: "Wallet creation failed" });
+  }
+});
+
+/* ================= TRANSFER LOGIC ================= */
 async function sendMoney(req, res) {
   try {
     const { from, to, amount, reference } = req.body;
 
     if (!from || !to || !amount) {
-      return res.status(400).json({ message: "Missing fields" });
+      return res.status(400).json({ message: "Missing required fields" });
     }
 
     const sender = await Wallet.findOne({ owner: from });
     const receiver = await Wallet.findOne({ owner: to });
 
-    if (!sender) return res.status(404).json({ message: "Sender wallet not found" });
-    if (!receiver) return res.status(404).json({ message: "Receiver wallet not found" });
+    if (!sender) {
+      return res.status(404).json({ message: "Sender wallet not found" });
+    }
+
+    if (!receiver) {
+      return res.status(404).json({ message: "Receiver wallet not found" });
+    }
+
     if (sender.balance < amount) {
       return res.status(400).json({ message: "Insufficient balance" });
     }
@@ -57,23 +96,33 @@ async function sendMoney(req, res) {
     await sender.save();
     await receiver.save();
 
-    const tx = await Transaction.create({ from, to, amount, reference });
+    const tx = await Transaction.create({
+      from,
+      to,
+      amount,
+      reference
+    });
 
-    res.json({ message: "Transfer successful", transactionId: tx._id });
+    res.json({
+      message: "Transfer successful",
+      transactionId: tx._id
+    });
+
   } catch (err) {
-    console.error(err);
+    console.error("❌ Transfer error:", err.message);
     res.status(500).json({ message: "Transfer failed" });
   }
 }
 
-/* ================= ROUTES ================= */
-app.get("/api/health", (req, res) => {
-  res.json({ status: "Smart Pay running" });
-});
-
+/* ================= TRANSFER ROUTES ================= */
 app.post("/api/send-money", sendMoney);
 app.post("/api/wallet/send", sendMoney);
 app.post("/api/transfer", sendMoney);
+
+/* ================= HEALTH ================= */
+app.get("/api/health", (req, res) => {
+  res.json({ status: "Smart Pay running" });
+});
 
 /* ================= START ================= */
 app.listen(PORT, () => {
