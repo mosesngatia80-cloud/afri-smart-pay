@@ -1,53 +1,76 @@
+/**
+ * SMART PAY – API SERVER (SINGLE SOURCE OF TRUTH)
+ * - API-only (no frontend)
+ * - Wallets by `owner` (string)
+ * - BUSINESS + USER wallets supported
+ * - Legacy `phone` index safely removed
+ */
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 require("dotenv").config();
 
+const Wallet = require("./models/Wallet");
+
 const app = express();
-
-/* ================= CONFIG ================= */
-const PORT = process.env.PORT || 3000;
-
-/* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(express.json());
 
-/* ================= DATABASE ================= */
+/* =========================
+   HEALTH CHECK
+========================= */
+app.get("/api/health", (req, res) => {
+  res.json({ status: "Smart Pay running" });
+});
+
+/* =========================
+   MONGODB CONNECT
+========================= */
+const MONGO_URI = process.env.MONGO_URI;
+if (!MONGO_URI) {
+  console.error("❌ MONGO_URI not set");
+  process.exit(1);
+}
+
 mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ MongoDB error:", err.message));
+  .connect(MONGO_URI)
+  .then(async () => {
+    console.log("✅ MongoDB connected");
 
-/* ================= MODELS ================= */
-const WalletSchema = new mongoose.Schema({
-  owner: { type: String, unique: true },
-  balance: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now }
-});
+    // 🔥 DROP LEGACY phone_1 INDEX (SAFE, RUNS ONCE)
+    try {
+      const collection = mongoose.connection.db.collection("wallets");
+      const indexes = await collection.indexes();
+      const phoneIndex = indexes.find(i => i.name === "phone_1");
 
-const TransactionSchema = new mongoose.Schema({
-  from: String,
-  to: String,
-  amount: Number,
-  reference: String,
-  createdAt: { type: Date, default: Date.now }
-});
+      if (phoneIndex) {
+        await collection.dropIndex("phone_1");
+        console.log("🧹 Dropped legacy phone_1 index");
+      } else {
+        console.log("ℹ️ No legacy phone_1 index found");
+      }
+    } catch (err) {
+      console.log("ℹ️ Index cleanup skipped:", err.message);
+    }
+  })
+  .catch(err => {
+    console.error("❌ MongoDB error:", err.message);
+    process.exit(1);
+  });
 
-const Wallet = mongoose.model("Wallet", WalletSchema);
-const Transaction = mongoose.model("Transaction", TransactionSchema);
-
-/* ================= WALLET ROUTES ================= */
-
-/* Create wallet (idempotent) */
+/* =========================
+   CREATE WALLET (IDEMPOTENT)
+========================= */
 app.post("/api/wallet/create", async (req, res) => {
   try {
-    const { owner } = req.body;
+    const { owner, type = "USER" } = req.body;
+
     if (!owner) {
       return res.status(400).json({ message: "Owner is required" });
     }
 
     let wallet = await Wallet.findOne({ owner });
-
     if (wallet) {
       return res.json({
         message: "Wallet already exists",
@@ -55,51 +78,56 @@ app.post("/api/wallet/create", async (req, res) => {
       });
     }
 
-    wallet = await Wallet.create({ owner });
+    wallet = await Wallet.create({
+      owner,
+      type,
+      balance: 0
+    });
 
     res.json({
       message: "Wallet created",
       wallet
     });
-
   } catch (err) {
-    console.error("❌ Wallet create error:", err.message);
-    res.status(500).json({ message: "Wallet creation failed" });
+    console.error("❌ Wallet create error:", err);
+    res.status(500).json({
+      message: "Wallet creation failed",
+      error: err.message   // TEMP: expose real error for debugging
+    });
   }
 });
 
-/* Get wallet by owner */
+/* =========================
+   GET WALLET BY OWNER
+========================= */
 app.get("/api/wallet/:owner", async (req, res) => {
   try {
     const wallet = await Wallet.findOne({ owner: req.params.owner });
     if (!wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
-
     res.json(wallet);
   } catch (err) {
     res.status(500).json({ message: "Error fetching wallet" });
   }
 });
 
-/* ================= TRANSFER LOGIC ================= */
-async function sendMoney(req, res) {
+/* =========================
+   SEND MONEY
+========================= */
+app.post("/api/wallet/send", async (req, res) => {
   try {
-    const { from, to, amount, reference } = req.body;
+    const { from, to, amount } = req.body;
 
     if (!from || !to || !amount) {
-      return res.status(400).json({ message: "Missing required fields" });
+      return res.status(400).json({ message: "Missing fields" });
     }
 
     const sender = await Wallet.findOne({ owner: from });
     const receiver = await Wallet.findOne({ owner: to });
 
-    if (!sender) {
-      return res.status(404).json({ message: "Sender wallet not found" });
-    }
-
-    if (!receiver) {
-      return res.status(404).json({ message: "Receiver wallet not found" });
+    if (!sender || !receiver) {
+      return res.status(404).json({ message: "Wallet not found" });
     }
 
     if (sender.balance < amount) {
@@ -112,38 +140,17 @@ async function sendMoney(req, res) {
     await sender.save();
     await receiver.save();
 
-    const tx = await Transaction.create({
-      from,
-      to,
-      amount,
-      reference
-    });
-
-    res.json({
-      message: "Transfer successful",
-      transactionId: tx._id
-    });
-
+    res.json({ message: "Transfer successful" });
   } catch (err) {
-    console.error("❌ Transfer error:", err.message);
+    console.error("❌ Transfer error:", err);
     res.status(500).json({ message: "Transfer failed" });
   }
-}
-
-/* ================= TRANSFER ROUTES ================= */
-app.post("/api/wallet/send", sendMoney);
-app.post("/api/send-money", sendMoney);
-app.post("/api/transfer", sendMoney);
-
-/* ================= HEALTH ================= */
-app.get("/api/health", (req, res) => {
-  res.json({ status: "Smart Pay running" });
 });
 
-/* ================= START ================= */
+/* =========================
+   START SERVER
+========================= */
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Smart Pay running on port ${PORT}`);
 });
-
-// 🔁 Render rebuild trigger (safe to keep)
-console.log("🔄 Smart Pay booted at", new Date().toISOString());
