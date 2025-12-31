@@ -144,3 +144,6 @@ app.get("/api/health", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Smart Pay running on port ${PORT}`);
 });
+
+// 🔁 Render rebuild trigger (safe to keep)
+console.log("🔄 Smart Pay booted at", new Date().toISOString());
