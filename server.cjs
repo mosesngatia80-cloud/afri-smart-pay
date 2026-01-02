@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
 
 const app = express();
 app.use(express.json());
@@ -20,14 +21,17 @@ mongoose.connect(process.env.MONGO_URI, {
 // =====================
 const WalletSchema = new mongoose.Schema({
   owner: { type: String, unique: true },
-  balance: { type: Number, default: 0 }
+  balance: { type: Number, default: 0 },
+
+  // 🔐 PIN SECURITY
+  pinHash: String
 });
 
 const TransactionSchema = new mongoose.Schema({
   transId: { type: String, unique: true },
   owner: String,
   amount: Number,
-  type: { type: String, default: "C2B" },
+  type: String,
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -38,94 +42,108 @@ const Transaction = mongoose.model("Transaction", TransactionSchema);
 // ROUTES
 // =====================
 
-// 🔎 Health check
+// Health
 app.get("/api/health", (req, res) => {
   res.json({ status: "Smart Pay LIVE 🚀" });
 });
 
-// 💳 Get wallet balance
+// Wallet balance
 app.get("/api/wallet/:owner", async (req, res) => {
   const wallet = await Wallet.findOne({ owner: req.params.owner });
-  if (!wallet) {
-    return res.status(404).json({ message: "Wallet not found" });
-  }
+  if (!wallet) return res.status(404).json({ message: "Wallet not found" });
   res.json(wallet);
+});
+
+// =====================
+// SET / UPDATE PIN
+// =====================
+app.post("/api/wallet/set-pin", async (req, res) => {
+  const { owner, pin } = req.body;
+
+  if (!owner || !pin || pin.length < 4) {
+    return res.status(400).json({ message: "Invalid PIN" });
+  }
+
+  let wallet = await Wallet.findOne({ owner });
+  if (!wallet) wallet = await Wallet.create({ owner, balance: 0 });
+
+  wallet.pinHash = await bcrypt.hash(pin, 10);
+  await wallet.save();
+
+  res.json({ message: "PIN set successfully" });
 });
 
 // =====================
 // C2B VALIDATION
 // =====================
 app.post("/api/c2b/validation", (req, res) => {
-  console.log("✅ C2B VALIDATION:", req.body);
-  return res.json({
-    ResultCode: 0,
-    ResultDesc: "Accepted"
-  });
+  return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 });
 
 // =====================
-// C2B CONFIRMATION (UX CORRECT)
+// C2B CONFIRMATION (UX SAFE)
 // =====================
 app.post("/api/c2b/confirmation", async (req, res) => {
-  console.log("✅ C2B CONFIRMATION:", req.body);
+  const { TransID, TransAmount, BillRefNumber } = req.body;
 
-  const {
-    TransID,
-    TransAmount,
-    BillRefNumber
-  } = req.body;
-
-  try {
-    if (!TransID || !TransAmount || !BillRefNumber) {
-      console.warn("⚠️ Missing C2B fields");
-      return res.json({ ResultCode: 0, ResultDesc: "Ignored" });
-    }
-
-    // 🔒 Idempotency: prevent double credit
-    const exists = await Transaction.findOne({ transId: TransID });
-    if (exists) {
-      console.log("🔁 Duplicate transaction:", TransID);
-      return res.json({
-        ResultCode: 0,
-        ResultDesc: "Already processed"
-      });
-    }
-
-    // 💳 Find or create wallet using BillRefNumber
-    let wallet = await Wallet.findOne({ owner: BillRefNumber });
-    if (!wallet) {
-      wallet = await Wallet.create({
-        owner: BillRefNumber,
-        balance: 0
-      });
-    }
-
-    // ➕ Credit wallet
-    wallet.balance += Number(TransAmount);
-    await wallet.save();
-
-    // 🧾 Save transaction
-    await Transaction.create({
-      transId: TransID,
-      owner: BillRefNumber,
-      amount: Number(TransAmount),
-      type: "C2B"
-    });
-
-    console.log(`💰 Wallet ${BillRefNumber} credited with ${TransAmount}`);
-
-    return res.json({
-      ResultCode: 0,
-      ResultDesc: "Success"
-    });
-
-  } catch (err) {
-    console.error("❌ CONFIRMATION ERROR:", err.message);
-    return res.json({
-      ResultCode: 0,
-      ResultDesc: "Accepted"
-    });
+  if (!TransID || !TransAmount || !BillRefNumber) {
+    return res.json({ ResultCode: 0, ResultDesc: "Ignored" });
   }
+
+  const exists = await Transaction.findOne({ transId: TransID });
+  if (exists) {
+    return res.json({ ResultCode: 0, ResultDesc: "Duplicate" });
+  }
+
+  let wallet = await Wallet.findOne({ owner: BillRefNumber });
+  if (!wallet) wallet = await Wallet.create({ owner: BillRefNumber, balance: 0 });
+
+  wallet.balance += Number(TransAmount);
+  await wallet.save();
+
+  await Transaction.create({
+    transId: TransID,
+    owner: BillRefNumber,
+    amount: Number(TransAmount),
+    type: "C2B"
+  });
+
+  res.json({ ResultCode: 0, ResultDesc: "Success" });
+});
+
+// =====================
+// B2C WITHDRAW (PIN PROTECTED)
+// =====================
+app.post("/api/b2c/withdraw", async (req, res) => {
+  const { owner, amount, pin } = req.body;
+
+  const wallet = await Wallet.findOne({ owner });
+  if (!wallet) return res.status(404).json({ message: "Wallet not found" });
+
+  if (!wallet.pinHash) {
+    return res.status(403).json({ message: "PIN not set" });
+  }
+
+  const validPin = await bcrypt.compare(pin, wallet.pinHash);
+  if (!validPin) {
+    return res.status(403).json({ message: "Invalid PIN" });
+  }
+
+  if (wallet.balance < amount) {
+    return res.status(400).json({ message: "Insufficient balance" });
+  }
+
+  wallet.balance -= Number(amount);
+  await wallet.save();
+
+  await Transaction.create({
+    transId: `B2C_${Date.now()}`,
+    owner,
+    amount: Number(amount),
+    type: "B2C"
+  });
+
+  res.json({ message: "Withdrawal approved", amount });
 });
 
 // =====================
@@ -134,48 +152,4 @@ app.post("/api/c2b/confirmation", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Smart Pay running on port ${PORT}`);
-});
-
-// =====================
-// B2C WITHDRAWAL (LOGIC ONLY)
-// =====================
-app.post("/api/b2c/withdraw", async (req, res) => {
-  try {
-    const { owner, phone, amount } = req.body;
-
-    if (!owner || !phone || !amount) {
-      return res.status(400).json({ message: "Missing fields" });
-    }
-
-    const wallet = await Wallet.findOne({ owner });
-    if (!wallet) {
-      return res.status(404).json({ message: "Wallet not found" });
-    }
-
-    if (wallet.balance < Number(amount)) {
-      return res.status(400).json({ message: "Insufficient balance" });
-    }
-
-    // Debit wallet
-    wallet.balance -= Number(amount);
-    await wallet.save();
-
-    // Record transaction
-    await Transaction.create({
-      transId: `B2C_${Date.now()}`,
-      owner,
-      amount: Number(amount),
-      type: "B2C"
-    });
-
-    console.log(`💸 B2C withdrawal queued for ${owner}: ${amount}`);
-
-    return res.json({
-      message: "Withdrawal queued",
-      amount
-    });
-  } catch (err) {
-    console.error("❌ B2C ERROR:", err.message);
-    return res.status(500).json({ message: "B2C failed" });
-  }
 });
