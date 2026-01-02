@@ -135,3 +135,47 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Smart Pay running on port ${PORT}`);
 });
+
+// =====================
+// B2C WITHDRAWAL (LOGIC ONLY)
+// =====================
+app.post("/api/b2c/withdraw", async (req, res) => {
+  try {
+    const { owner, phone, amount } = req.body;
+
+    if (!owner || !phone || !amount) {
+      return res.status(400).json({ message: "Missing fields" });
+    }
+
+    const wallet = await Wallet.findOne({ owner });
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet not found" });
+    }
+
+    if (wallet.balance < Number(amount)) {
+      return res.status(400).json({ message: "Insufficient balance" });
+    }
+
+    // Debit wallet
+    wallet.balance -= Number(amount);
+    await wallet.save();
+
+    // Record transaction
+    await Transaction.create({
+      transId: `B2C_${Date.now()}`,
+      owner,
+      amount: Number(amount),
+      type: "B2C"
+    });
+
+    console.log(`💸 B2C withdrawal queued for ${owner}: ${amount}`);
+
+    return res.json({
+      message: "Withdrawal queued",
+      amount
+    });
+  } catch (err) {
+    console.error("❌ B2C ERROR:", err.message);
+    return res.status(500).json({ message: "B2C failed" });
+  }
+});
