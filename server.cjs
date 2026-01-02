@@ -25,7 +25,7 @@ const WalletSchema = new mongoose.Schema({
 
 const TransactionSchema = new mongoose.Schema({
   transId: { type: String, unique: true },
-  phone: String,
+  owner: String,
   amount: Number,
   type: { type: String, default: "C2B" },
   createdAt: { type: Date, default: Date.now }
@@ -44,8 +44,8 @@ app.get("/api/health", (req, res) => {
 });
 
 // 💳 Get wallet balance
-app.get("/api/wallet/:phone", async (req, res) => {
-  const wallet = await Wallet.findOne({ owner: req.params.phone });
+app.get("/api/wallet/:owner", async (req, res) => {
+  const wallet = await Wallet.findOne({ owner: req.params.owner });
   if (!wallet) {
     return res.status(404).json({ message: "Wallet not found" });
   }
@@ -57,8 +57,6 @@ app.get("/api/wallet/:phone", async (req, res) => {
 // =====================
 app.post("/api/c2b/validation", (req, res) => {
   console.log("✅ C2B VALIDATION:", req.body);
-
-  // Always accept
   return res.json({
     ResultCode: 0,
     ResultDesc: "Accepted"
@@ -66,7 +64,7 @@ app.post("/api/c2b/validation", (req, res) => {
 });
 
 // =====================
-// C2B CONFIRMATION
+// C2B CONFIRMATION (UX CORRECT)
 // =====================
 app.post("/api/c2b/confirmation", async (req, res) => {
   console.log("✅ C2B CONFIRMATION:", req.body);
@@ -74,23 +72,32 @@ app.post("/api/c2b/confirmation", async (req, res) => {
   const {
     TransID,
     TransAmount,
-    MSISDN
+    BillRefNumber
   } = req.body;
 
   try {
-    // 🔒 Prevent double credit
+    if (!TransID || !TransAmount || !BillRefNumber) {
+      console.warn("⚠️ Missing C2B fields");
+      return res.json({ ResultCode: 0, ResultDesc: "Ignored" });
+    }
+
+    // 🔒 Idempotency: prevent double credit
     const exists = await Transaction.findOne({ transId: TransID });
     if (exists) {
+      console.log("🔁 Duplicate transaction:", TransID);
       return res.json({
         ResultCode: 0,
         ResultDesc: "Already processed"
       });
     }
 
-    // 💳 Get or create wallet
-    let wallet = await Wallet.findOne({ owner: MSISDN });
+    // 💳 Find or create wallet using BillRefNumber
+    let wallet = await Wallet.findOne({ owner: BillRefNumber });
     if (!wallet) {
-      wallet = await Wallet.create({ owner: MSISDN });
+      wallet = await Wallet.create({
+        owner: BillRefNumber,
+        balance: 0
+      });
     }
 
     // ➕ Credit wallet
@@ -100,9 +107,12 @@ app.post("/api/c2b/confirmation", async (req, res) => {
     // 🧾 Save transaction
     await Transaction.create({
       transId: TransID,
-      phone: MSISDN,
-      amount: TransAmount
+      owner: BillRefNumber,
+      amount: Number(TransAmount),
+      type: "C2B"
     });
+
+    console.log(`💰 Wallet ${BillRefNumber} credited with ${TransAmount}`);
 
     return res.json({
       ResultCode: 0,
@@ -111,8 +121,6 @@ app.post("/api/c2b/confirmation", async (req, res) => {
 
   } catch (err) {
     console.error("❌ CONFIRMATION ERROR:", err.message);
-
-    // IMPORTANT: still return success to avoid retries
     return res.json({
       ResultCode: 0,
       ResultDesc: "Accepted"
