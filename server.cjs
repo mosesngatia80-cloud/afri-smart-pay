@@ -11,16 +11,23 @@ app.use(express.json());
 app.use(cors());
 
 /* =======================
-   ENV & CONFIG
+   ENV
    ======================= */
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "production";
 
 /* =======================
-   DB CONNECT
+   DB CONNECT (FIXED)
    ======================= */
+const MONGO_URI =
+  process.env.MONGO_URI || process.env.MONGODB_URI;
+
+if (!MONGO_URI) {
+  console.error("❌ MongoDB URI missing");
+}
+
 mongoose
-  .connect(process.env.MONGO_URI, {
+  .connect(MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
   })
@@ -31,7 +38,7 @@ mongoose
    MODELS
    ======================= */
 const WalletSchema = new mongoose.Schema({
-  owner: String,
+  owner: { type: String, unique: true },
   balance: { type: Number, default: 0 }
 });
 
@@ -65,19 +72,25 @@ app.get("/api/health", (req, res) => {
 app.post("/api/admin/freeze", (req, res) => {
   withdrawalsFrozen = !!req.body.freeze;
   res.json({
-    message: withdrawalsFrozen ? "Withdrawals FROZEN" : "Withdrawals UNFROZEN"
+    message: withdrawalsFrozen
+      ? "Withdrawals FROZEN"
+      : "Withdrawals UNFROZEN"
   });
 });
 
 /* =======================
-   WALLET
+   WALLET CREATE
    ======================= */
 app.post("/api/wallet/create", async (req, res) => {
   const { owner } = req.body;
-  if (!owner) return res.status(400).json({ message: "Owner required" });
+  if (!owner) {
+    return res.status(400).json({ message: "Owner required" });
+  }
 
   let wallet = await Wallet.findOne({ owner });
-  if (wallet) return res.json({ message: "Wallet exists", wallet });
+  if (wallet) {
+    return res.json({ message: "Wallet exists", wallet });
+  }
 
   wallet = await Wallet.create({ owner });
   res.json({ message: "Wallet created", wallet });
@@ -89,6 +102,7 @@ app.post("/api/wallet/create", async (req, res) => {
 app.post("/api/b2c/request-otp", async (req, res) => {
   try {
     const { owner, amount, pin } = req.body;
+
     if (!owner || !amount || !pin) {
       return res.status(400).json({ message: "Missing fields" });
     }
@@ -107,7 +121,7 @@ app.post("/api/b2c/request-otp", async (req, res) => {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 60 * 1000; // 60 seconds
+    const expiresAt = Date.now() + 60 * 1000;
 
     otpStore.set(owner, { otp, amount, expiresAt });
 
@@ -117,7 +131,7 @@ app.post("/api/b2c/request-otp", async (req, res) => {
 
     res.json({ message: "OTP sent" });
   } catch (err) {
-    console.error("OTP request error", err);
+    console.error("❌ OTP request error", err);
     res.status(500).json({ message: "OTP error" });
   }
 });
@@ -128,6 +142,7 @@ app.post("/api/b2c/request-otp", async (req, res) => {
 app.post("/api/b2c/confirm", async (req, res) => {
   try {
     const { owner, otp } = req.body;
+
     if (!owner || !otp) {
       return res.status(400).json({ message: "Owner and OTP required" });
     }
@@ -173,13 +188,13 @@ app.post("/api/b2c/confirm", async (req, res) => {
       amount: record.amount
     });
   } catch (err) {
-    console.error("OTP confirm error", err);
+    console.error("❌ OTP confirm error", err);
     res.status(500).json({ message: "Confirmation error" });
   }
 });
 
 /* =======================
-   C2B CONFIRMATION (LIVE)
+   C2B CONFIRMATION
    ======================= */
 app.post("/api/c2b/confirmation", async (req, res) => {
   console.log("📩 C2B confirmation", req.body);
@@ -187,7 +202,7 @@ app.post("/api/c2b/confirmation", async (req, res) => {
 });
 
 /* =======================
-   START
+   START SERVER
    ======================= */
 app.listen(PORT, () => {
   console.log(`🚀 Afri Smart Pay running on port ${PORT}`);
