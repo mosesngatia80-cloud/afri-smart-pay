@@ -23,8 +23,12 @@ const WalletSchema = new mongoose.Schema({
   owner: { type: String, unique: true },
   balance: { type: Number, default: 0 },
 
-  // 🔐 PIN SECURITY
-  pinHash: String
+  // 🔐 Security
+  pinHash: String,
+
+  // 🔒 Limits
+  dailyWithdrawn: { type: Number, default: 0 },
+  lastWithdrawDate: Date
 });
 
 const TransactionSchema = new mongoose.Schema({
@@ -39,15 +43,21 @@ const Wallet = mongoose.model("Wallet", WalletSchema);
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 
 // =====================
+// CONFIG LIMITS
+// =====================
+const DAILY_LIMIT = 10000;       // KES
+const TX_LIMIT = 5000;           // KES
+
+// =====================
 // ROUTES
 // =====================
 
-// 🔎 Health
+// Health
 app.get("/api/health", (req, res) => {
   res.json({ status: "Smart Pay LIVE 🚀" });
 });
 
-// 💳 Wallet balance
+// Wallet balance
 app.get("/api/wallet/:owner", async (req, res) => {
   const wallet = await Wallet.findOne({ owner: req.params.owner });
   if (!wallet) return res.status(404).json({ message: "Wallet not found" });
@@ -55,7 +65,7 @@ app.get("/api/wallet/:owner", async (req, res) => {
 });
 
 // =====================
-// 🔐 SET / UPDATE PIN
+// SET / UPDATE PIN
 // =====================
 app.post("/api/wallet/set-pin", async (req, res) => {
   const { owner, pin } = req.body;
@@ -77,38 +87,26 @@ app.post("/api/wallet/set-pin", async (req, res) => {
 // C2B VALIDATION
 // =====================
 app.post("/api/c2b/validation", (req, res) => {
-  return res.json({
-    ResultCode: 0,
-    ResultDesc: "Accepted"
-  });
+  return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 });
 
 // =====================
 // C2B CONFIRMATION (UX SAFE)
-// Uses BillRefNumber as wallet owner
 // =====================
 app.post("/api/c2b/confirmation", async (req, res) => {
-  console.log("✅ C2B CONFIRMATION:", req.body);
-
   const { TransID, TransAmount, BillRefNumber } = req.body;
 
   if (!TransID || !TransAmount || !BillRefNumber) {
     return res.json({ ResultCode: 0, ResultDesc: "Ignored" });
   }
 
-  // 🔒 Idempotency
   const exists = await Transaction.findOne({ transId: TransID });
   if (exists) {
     return res.json({ ResultCode: 0, ResultDesc: "Duplicate" });
   }
 
   let wallet = await Wallet.findOne({ owner: BillRefNumber });
-  if (!wallet) {
-    wallet = await Wallet.create({
-      owner: BillRefNumber,
-      balance: 0
-    });
-  }
+  if (!wallet) wallet = await Wallet.create({ owner: BillRefNumber, balance: 0 });
 
   wallet.balance += Number(TransAmount);
   await wallet.save();
@@ -120,14 +118,11 @@ app.post("/api/c2b/confirmation", async (req, res) => {
     type: "C2B"
   });
 
-  return res.json({
-    ResultCode: 0,
-    ResultDesc: "Success"
-  });
+  return res.json({ ResultCode: 0, ResultDesc: "Success" });
 });
 
 // =====================
-// 💸 B2C WITHDRAW (PIN PROTECTED)
+// 💸 B2C WITHDRAW (PIN + LIMITS)
 // =====================
 app.post("/api/b2c/withdraw", async (req, res) => {
   const { owner, amount, pin } = req.body;
@@ -136,10 +131,14 @@ app.post("/api/b2c/withdraw", async (req, res) => {
     return res.status(400).json({ message: "Missing fields" });
   }
 
-  const wallet = await Wallet.findOne({ owner });
-  if (!wallet) {
-    return res.status(404).json({ message: "Wallet not found" });
+  const amt = Number(amount);
+
+  if (amt > TX_LIMIT) {
+    return res.status(403).json({ message: "Transaction limit exceeded" });
   }
+
+  const wallet = await Wallet.findOne({ owner });
+  if (!wallet) return res.status(404).json({ message: "Wallet not found" });
 
   if (!wallet.pinHash) {
     return res.status(403).json({ message: "PIN not set" });
@@ -150,24 +149,33 @@ app.post("/api/b2c/withdraw", async (req, res) => {
     return res.status(403).json({ message: "Invalid PIN" });
   }
 
-  if (wallet.balance < Number(amount)) {
+  // Reset daily counter if new day
+  const today = new Date().toDateString();
+  if (!wallet.lastWithdrawDate || wallet.lastWithdrawDate.toDateString() !== today) {
+    wallet.dailyWithdrawn = 0;
+    wallet.lastWithdrawDate = new Date();
+  }
+
+  if (wallet.dailyWithdrawn + amt > DAILY_LIMIT) {
+    return res.status(403).json({ message: "Daily limit exceeded" });
+  }
+
+  if (wallet.balance < amt) {
     return res.status(400).json({ message: "Insufficient balance" });
   }
 
-  wallet.balance -= Number(amount);
+  wallet.balance -= amt;
+  wallet.dailyWithdrawn += amt;
   await wallet.save();
 
   await Transaction.create({
     transId: `B2C_${Date.now()}`,
     owner,
-    amount: Number(amount),
+    amount: amt,
     type: "B2C"
   });
 
-  res.json({
-    message: "Withdrawal approved",
-    amount: Number(amount)
-  });
+  res.json({ message: "Withdrawal approved", amount: amt });
 });
 
 // =====================
