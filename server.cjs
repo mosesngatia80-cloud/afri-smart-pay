@@ -22,47 +22,66 @@ mongoose.connect(process.env.MONGO_URI, {
 const WalletSchema = new mongoose.Schema({
   owner: { type: String, unique: true },
   balance: { type: Number, default: 0 },
-
-  // 🔐 Security
   pinHash: String,
-
-  // 🔒 Limits
+  frozen: { type: Boolean, default: false },
   dailyWithdrawn: { type: Number, default: 0 },
-  lastWithdrawDate: Date,
-
-  // 🔑 OTP
-  otpHash: String,
-  otpExpiresAt: Date
+  lastWithdrawDate: String
 });
 
 const TransactionSchema = new mongoose.Schema({
-  transId: { type: String, unique: true },
+  transId: String,
   owner: String,
   amount: Number,
   type: String,
   createdAt: { type: Date, default: Date.now }
 });
 
+const SystemSchema = new mongoose.Schema({
+  key: { type: String, unique: true },
+  withdrawalsFrozen: { type: Boolean, default: false }
+});
+
 const Wallet = mongoose.model("Wallet", WalletSchema);
 const Transaction = mongoose.model("Transaction", TransactionSchema);
+const SystemConfig = mongoose.model("SystemConfig", SystemSchema);
 
 // =====================
-// CONFIG
+// HELPERS
 // =====================
-const DAILY_LIMIT = 10000; // KES
-const TX_LIMIT = 5000;     // KES
-const OTP_TTL_MS = 2 * 60 * 1000; // 2 minutes
+async function isSystemFrozen() {
+  let config = await SystemConfig.findOne({ key: "GLOBAL" });
+  if (!config) {
+    config = await SystemConfig.create({ key: "GLOBAL", withdrawalsFrozen: false });
+  }
+  return config.withdrawalsFrozen;
+}
 
 // =====================
 // ROUTES
 // =====================
-
-// Health
 app.get("/api/health", (req, res) => {
   res.json({ status: "Smart Pay LIVE 🚀" });
 });
 
-// Wallet balance
+// 🔒 ADMIN: GLOBAL FREEZE
+app.post("/api/admin/freeze", async (req, res) => {
+  const { freeze } = req.body;
+  const config = await SystemConfig.findOneAndUpdate(
+    { key: "GLOBAL" },
+    { withdrawalsFrozen: freeze },
+    { upsert: true, new: true }
+  );
+  res.json({ message: `Withdrawals ${freeze ? "FROZEN" : "UNFROZEN"}` });
+});
+
+// 🔒 ADMIN: FREEZE WALLET
+app.post("/api/admin/freeze-wallet", async (req, res) => {
+  const { owner, freeze } = req.body;
+  await Wallet.updateOne({ owner }, { frozen: freeze });
+  res.json({ message: `Wallet ${freeze ? "FROZEN" : "UNFROZEN"}` });
+});
+
+// 💳 GET WALLET
 app.get("/api/wallet/:owner", async (req, res) => {
   const wallet = await Wallet.findOne({ owner: req.params.owner });
   if (!wallet) return res.status(404).json({ message: "Wallet not found" });
@@ -70,153 +89,42 @@ app.get("/api/wallet/:owner", async (req, res) => {
 });
 
 // =====================
-// SET / UPDATE PIN
+// B2C WITHDRAW (SECURED)
 // =====================
-app.post("/api/wallet/set-pin", async (req, res) => {
-  const { owner, pin } = req.body;
-
-  if (!owner || !pin || pin.length < 4) {
-    return res.status(400).json({ message: "Invalid PIN" });
-  }
-
-  let wallet = await Wallet.findOne({ owner });
-  if (!wallet) wallet = await Wallet.create({ owner, balance: 0 });
-
-  wallet.pinHash = await bcrypt.hash(pin, 10);
-  await wallet.save();
-
-  res.json({ message: "PIN set successfully" });
-});
-
-// =====================
-// C2B VALIDATION
-// =====================
-app.post("/api/c2b/validation", (req, res) => {
-  return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-});
-
-// =====================
-// C2B CONFIRMATION (UX SAFE)
-// =====================
-app.post("/api/c2b/confirmation", async (req, res) => {
-  const { TransID, TransAmount, BillRefNumber } = req.body;
-
-  if (!TransID || !TransAmount || !BillRefNumber) {
-    return res.json({ ResultCode: 0, ResultDesc: "Ignored" });
-  }
-
-  const exists = await Transaction.findOne({ transId: TransID });
-  if (exists) {
-    return res.json({ ResultCode: 0, ResultDesc: "Duplicate" });
-  }
-
-  let wallet = await Wallet.findOne({ owner: BillRefNumber });
-  if (!wallet) wallet = await Wallet.create({ owner: BillRefNumber, balance: 0 });
-
-  wallet.balance += Number(TransAmount);
-  await wallet.save();
-
-  await Transaction.create({
-    transId: TransID,
-    owner: BillRefNumber,
-    amount: Number(TransAmount),
-    type: "C2B"
-  });
-
-  return res.json({ ResultCode: 0, ResultDesc: "Success" });
-});
-
-// =====================
-// 🔑 REQUEST OTP (STEP 1)
-// =====================
-app.post("/api/b2c/request-otp", async (req, res) => {
+app.post("/api/b2c/withdraw", async (req, res) => {
   const { owner, amount, pin } = req.body;
 
-  const wallet = await Wallet.findOne({ owner });
-  if (!wallet) return res.status(404).json({ message: "Wallet not found" });
-
-  if (!wallet.pinHash) {
-    return res.status(403).json({ message: "PIN not set" });
+  // 🔒 Global freeze check
+  if (await isSystemFrozen()) {
+    return res.status(403).json({ message: "Withdrawals temporarily suspended" });
   }
-
-  const validPin = await bcrypt.compare(pin, wallet.pinHash);
-  if (!validPin) {
-    return res.status(403).json({ message: "Invalid PIN" });
-  }
-
-  const amt = Number(amount);
-  if (amt > TX_LIMIT) {
-    return res.status(403).json({ message: "Transaction limit exceeded" });
-  }
-
-  // Reset daily counter if new day
-  const today = new Date().toDateString();
-  if (!wallet.lastWithdrawDate || wallet.lastWithdrawDate.toDateString() !== today) {
-    wallet.dailyWithdrawn = 0;
-    wallet.lastWithdrawDate = new Date();
-  }
-
-  if (wallet.dailyWithdrawn + amt > DAILY_LIMIT) {
-    return res.status(403).json({ message: "Daily limit exceeded" });
-  }
-
-  if (wallet.balance < amt) {
-    return res.status(400).json({ message: "Insufficient balance" });
-  }
-
-  // Generate OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  wallet.otpHash = await bcrypt.hash(otp, 10);
-  wallet.otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
-  await wallet.save();
-
-  console.log(`🔐 OTP for ${owner}: ${otp} (valid 2 minutes)`);
-
-  res.json({ message: "OTP sent (check logs for now)" });
-});
-
-// =====================
-// 💸 CONFIRM WITHDRAW (STEP 2)
-// =====================
-app.post("/api/b2c/confirm", async (req, res) => {
-  const { owner, amount, otp } = req.body;
 
   const wallet = await Wallet.findOne({ owner });
   if (!wallet) return res.status(404).json({ message: "Wallet not found" });
 
-  if (!wallet.otpHash || !wallet.otpExpiresAt) {
-    return res.status(403).json({ message: "OTP not requested" });
+  // 🔒 Wallet freeze
+  if (wallet.frozen) {
+    return res.status(403).json({ message: "Wallet is frozen" });
   }
 
-  if (wallet.otpExpiresAt < new Date()) {
-    return res.status(403).json({ message: "OTP expired" });
-  }
+  // 🔐 PIN check
+  const ok = await bcrypt.compare(pin, wallet.pinHash || "");
+  if (!ok) return res.status(401).json({ message: "Invalid PIN" });
 
-  const validOtp = await bcrypt.compare(otp, wallet.otpHash);
-  if (!validOtp) {
-    return res.status(403).json({ message: "Invalid OTP" });
-  }
-
-  const amt = Number(amount);
-  if (wallet.balance < amt) {
+  if (wallet.balance < amount) {
     return res.status(400).json({ message: "Insufficient balance" });
   }
 
-  // Debit + clear OTP
-  wallet.balance -= amt;
-  wallet.dailyWithdrawn += amt;
-  wallet.otpHash = null;
-  wallet.otpExpiresAt = null;
+  wallet.balance -= amount;
   await wallet.save();
 
   await Transaction.create({
-    transId: `B2C_${Date.now()}`,
     owner,
-    amount: amt,
+    amount,
     type: "B2C"
   });
 
-  res.json({ message: "Withdrawal approved", amount: amt });
+  res.json({ message: "Withdrawal approved", amount });
 });
 
 // =====================
