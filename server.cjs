@@ -2,6 +2,9 @@
    AFRI SMART PAY SERVER
    ======================= */
 
+/* 🔑 LOAD ENV FIRST */
+require("dotenv").config();
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -14,7 +17,7 @@ app.use(cors());
    ENV
    ======================= */
 const PORT = process.env.PORT || 3000;
-const NODE_ENV = process.env.NODE_ENV || "production";
+const NODE_ENV = process.env.NODE_ENV || "development";
 
 /* =======================
    DB CONNECT (FIXED)
@@ -191,14 +194,6 @@ app.post("/api/b2c/confirm", async (req, res) => {
     console.error("❌ OTP confirm error", err);
     res.status(500).json({ message: "Confirmation error" });
   }
-});
-
-/* =======================
-   C2B CONFIRMATION
-   ======================= */
-app.post("/api/c2b/confirmation", async (req, res) => {
-  console.log("📩 C2B confirmation", req.body);
-  res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 });
 
 /* =======================
