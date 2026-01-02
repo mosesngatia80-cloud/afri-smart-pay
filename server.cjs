@@ -28,7 +28,11 @@ const WalletSchema = new mongoose.Schema({
 
   // 🔒 Limits
   dailyWithdrawn: { type: Number, default: 0 },
-  lastWithdrawDate: Date
+  lastWithdrawDate: Date,
+
+  // 🔑 OTP
+  otpHash: String,
+  otpExpiresAt: Date
 });
 
 const TransactionSchema = new mongoose.Schema({
@@ -43,10 +47,11 @@ const Wallet = mongoose.model("Wallet", WalletSchema);
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 
 // =====================
-// CONFIG LIMITS
+// CONFIG
 // =====================
-const DAILY_LIMIT = 10000;       // KES
-const TX_LIMIT = 5000;           // KES
+const DAILY_LIMIT = 10000; // KES
+const TX_LIMIT = 5000;     // KES
+const OTP_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 // =====================
 // ROUTES
@@ -122,20 +127,10 @@ app.post("/api/c2b/confirmation", async (req, res) => {
 });
 
 // =====================
-// 💸 B2C WITHDRAW (PIN + LIMITS)
+// 🔑 REQUEST OTP (STEP 1)
 // =====================
-app.post("/api/b2c/withdraw", async (req, res) => {
+app.post("/api/b2c/request-otp", async (req, res) => {
   const { owner, amount, pin } = req.body;
-
-  if (!owner || !amount || !pin) {
-    return res.status(400).json({ message: "Missing fields" });
-  }
-
-  const amt = Number(amount);
-
-  if (amt > TX_LIMIT) {
-    return res.status(403).json({ message: "Transaction limit exceeded" });
-  }
 
   const wallet = await Wallet.findOne({ owner });
   if (!wallet) return res.status(404).json({ message: "Wallet not found" });
@@ -147,6 +142,11 @@ app.post("/api/b2c/withdraw", async (req, res) => {
   const validPin = await bcrypt.compare(pin, wallet.pinHash);
   if (!validPin) {
     return res.status(403).json({ message: "Invalid PIN" });
+  }
+
+  const amt = Number(amount);
+  if (amt > TX_LIMIT) {
+    return res.status(403).json({ message: "Transaction limit exceeded" });
   }
 
   // Reset daily counter if new day
@@ -164,8 +164,49 @@ app.post("/api/b2c/withdraw", async (req, res) => {
     return res.status(400).json({ message: "Insufficient balance" });
   }
 
+  // Generate OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  wallet.otpHash = await bcrypt.hash(otp, 10);
+  wallet.otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
+  await wallet.save();
+
+  console.log(`🔐 OTP for ${owner}: ${otp} (valid 2 minutes)`);
+
+  res.json({ message: "OTP sent (check logs for now)" });
+});
+
+// =====================
+// 💸 CONFIRM WITHDRAW (STEP 2)
+// =====================
+app.post("/api/b2c/confirm", async (req, res) => {
+  const { owner, amount, otp } = req.body;
+
+  const wallet = await Wallet.findOne({ owner });
+  if (!wallet) return res.status(404).json({ message: "Wallet not found" });
+
+  if (!wallet.otpHash || !wallet.otpExpiresAt) {
+    return res.status(403).json({ message: "OTP not requested" });
+  }
+
+  if (wallet.otpExpiresAt < new Date()) {
+    return res.status(403).json({ message: "OTP expired" });
+  }
+
+  const validOtp = await bcrypt.compare(otp, wallet.otpHash);
+  if (!validOtp) {
+    return res.status(403).json({ message: "Invalid OTP" });
+  }
+
+  const amt = Number(amount);
+  if (wallet.balance < amt) {
+    return res.status(400).json({ message: "Insufficient balance" });
+  }
+
+  // Debit + clear OTP
   wallet.balance -= amt;
   wallet.dailyWithdrawn += amt;
+  wallet.otpHash = null;
+  wallet.otpExpiresAt = null;
   await wallet.save();
 
   await Transaction.create({
