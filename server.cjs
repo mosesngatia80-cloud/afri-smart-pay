@@ -1,45 +1,20 @@
-/* =======================
-   AFRI SMART PAY SERVER
-   ======================= */
-
-/* 🔑 LOAD ENV FIRST */
-require("dotenv").config();
-
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 
 const app = express();
-app.use(express.json());
+
+/* ================= MIDDLEWARE ================= */
 app.use(cors());
+app.use(express.json());
 
-/* =======================
-   ENV
-   ======================= */
-const PORT = process.env.PORT || 3000;
-const NODE_ENV = process.env.NODE_ENV || "development";
-
-/* =======================
-   DB CONNECT (FIXED)
-   ======================= */
-const MONGO_URI =
-  process.env.MONGO_URI || process.env.MONGODB_URI;
-
-if (!MONGO_URI) {
-  console.error("❌ MongoDB URI missing");
-}
-
+/* ================= MONGODB ================= */
 mongoose
-  .connect(MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-  })
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ MongoDB error", err));
+  .catch((err) => console.error("❌ MongoDB error:", err.message));
 
-/* =======================
-   MODELS
-   ======================= */
+/* ================= MODELS ================= */
 const WalletSchema = new mongoose.Schema({
   owner: { type: String, unique: true },
   balance: { type: Number, default: 0 }
@@ -47,158 +22,109 @@ const WalletSchema = new mongoose.Schema({
 
 const TransactionSchema = new mongoose.Schema({
   type: String,
-  owner: String,
+  phone: String,
   amount: Number,
   reference: String,
+  raw: Object,
   createdAt: { type: Date, default: Date.now }
 });
 
 const Wallet = mongoose.model("Wallet", WalletSchema);
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 
-/* =======================
-   GLOBAL STATE
-   ======================= */
-let withdrawalsFrozen = false;
-const otpStore = new Map();
-
-/* =======================
-   HEALTH
-   ======================= */
+/* ================= HEALTH ================= */
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", env: NODE_ENV });
+  res.json({ status: "OK", service: "Smart Pay LIVE" });
 });
 
-/* =======================
-   ADMIN FREEZE
-   ======================= */
-app.post("/api/admin/freeze", (req, res) => {
-  withdrawalsFrozen = !!req.body.freeze;
-  res.json({
-    message: withdrawalsFrozen
-      ? "Withdrawals FROZEN"
-      : "Withdrawals UNFROZEN"
+/* ================= WALLET ================= */
+app.post("/api/wallet/create", async (req, res) => {
+  try {
+    const { owner } = req.body;
+    if (!owner) return res.status(400).json({ message: "Owner required" });
+
+    let wallet = await Wallet.findOne({ owner });
+    if (!wallet) {
+      wallet = await Wallet.create({ owner });
+    }
+
+    res.json({ message: "Wallet ready", wallet });
+  } catch (err) {
+    res.status(500).json({ message: "Wallet error" });
+  }
+});
+
+app.get("/api/wallet/balance/:phone", async (req, res) => {
+  const wallet = await Wallet.findOne({ owner: req.params.phone });
+  if (!wallet) return res.status(404).json({ message: "Wallet not found" });
+  res.json({ balance: wallet.balance });
+});
+
+/* ================= C2B VALIDATION ================= */
+app.post("/api/c2b/validation", (req, res) => {
+  console.log("🔔 C2B VALIDATION HIT");
+  console.log(JSON.stringify(req.body, null, 2));
+
+  return res.json({
+    ResultCode: 0,
+    ResultDesc: "Accepted"
   });
 });
 
-/* =======================
-   WALLET CREATE
-   ======================= */
-app.post("/api/wallet/create", async (req, res) => {
-  const { owner } = req.body;
-  if (!owner) {
-    return res.status(400).json({ message: "Owner required" });
-  }
+/* ================= C2B CONFIRMATION ================= */
+app.post("/api/c2b/confirmation", async (req, res) => {
+  console.log("💰 C2B CONFIRMATION HIT");
+  console.log(JSON.stringify(req.body, null, 2));
 
-  let wallet = await Wallet.findOne({ owner });
-  if (wallet) {
-    return res.json({ message: "Wallet exists", wallet });
-  }
-
-  wallet = await Wallet.create({ owner });
-  res.json({ message: "Wallet created", wallet });
-});
-
-/* =======================
-   B2C REQUEST OTP
-   ======================= */
-app.post("/api/b2c/request-otp", async (req, res) => {
   try {
-    const { owner, amount, pin } = req.body;
+    const phone =
+      req.body.MSISDN ||
+      req.body.PhoneNumber ||
+      req.body.senderPhoneNumber;
 
-    if (!owner || !amount || !pin) {
-      return res.status(400).json({ message: "Missing fields" });
+    const amount = Number(req.body.TransAmount || req.body.amount || 0);
+    const reference =
+      req.body.TransID ||
+      req.body.transactionId ||
+      "C2B";
+
+    if (!phone || amount <= 0) {
+      return res.json({ ResultCode: 0, ResultDesc: "Ignored" });
     }
 
-    if (withdrawalsFrozen) {
-      return res.status(403).json({ message: "Withdrawals are frozen" });
-    }
-
-    const wallet = await Wallet.findOne({ owner });
+    // Ensure wallet exists
+    let wallet = await Wallet.findOne({ owner: phone });
     if (!wallet) {
-      return res.status(404).json({ message: "Wallet not found" });
+      wallet = await Wallet.create({ owner: phone });
     }
 
-    if (wallet.balance < amount) {
-      return res.status(400).json({ message: "Insufficient balance" });
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 60 * 1000;
-
-    otpStore.set(owner, { otp, amount, expiresAt });
-
-    if (NODE_ENV !== "production") {
-      console.log("🔐 OTP GENERATED", { owner, otp, expiresAt });
-    }
-
-    res.json({ message: "OTP sent" });
-  } catch (err) {
-    console.error("❌ OTP request error", err);
-    res.status(500).json({ message: "OTP error" });
-  }
-});
-
-/* =======================
-   B2C CONFIRM OTP
-   ======================= */
-app.post("/api/b2c/confirm", async (req, res) => {
-  try {
-    const { owner, otp } = req.body;
-
-    if (!owner || !otp) {
-      return res.status(400).json({ message: "Owner and OTP required" });
-    }
-
-    const record = otpStore.get(owner);
-
-    if (NODE_ENV !== "production") {
-      console.log("🔎 OTP CONFIRM ATTEMPT", {
-        owner,
-        providedOtp: otp,
-        stored: record
-      });
-    }
-
-    if (!record) {
-      return res.status(400).json({ message: "No OTP request found" });
-    }
-
-    if (Date.now() > record.expiresAt) {
-      otpStore.delete(owner);
-      return res.status(400).json({ message: "OTP expired" });
-    }
-
-    if (record.otp !== otp) {
-      return res.status(400).json({ message: "Invalid OTP" });
-    }
-
-    const wallet = await Wallet.findOne({ owner });
-    wallet.balance -= record.amount;
+    // Credit wallet
+    wallet.balance += amount;
     await wallet.save();
 
+    // Save transaction
     await Transaction.create({
-      type: "B2C",
-      owner,
-      amount: record.amount,
-      reference: "B2C-" + Date.now()
+      type: "C2B",
+      phone,
+      amount,
+      reference,
+      raw: req.body
     });
 
-    otpStore.delete(owner);
+    console.log(`✅ Wallet credited: ${phone} +${amount}`);
 
-    res.json({
-      message: "Withdrawal successful",
-      amount: record.amount
+    return res.json({
+      ResultCode: 0,
+      ResultDesc: "Success"
     });
   } catch (err) {
-    console.error("❌ OTP confirm error", err);
-    res.status(500).json({ message: "Confirmation error" });
+    console.error("❌ Confirmation error:", err.message);
+    return res.json({ ResultCode: 0, ResultDesc: "Handled" });
   }
 });
 
-/* =======================
-   START SERVER
-   ======================= */
+/* ================= START ================= */
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Afri Smart Pay running on port ${PORT}`);
+  console.log(`🚀 Smart Pay running on port ${PORT}`);
 });
