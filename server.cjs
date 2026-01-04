@@ -4,6 +4,9 @@ const cors = require("cors");
 
 const app = express();
 
+/* ===== DEPLOY MARKER (DO NOT REMOVE) ===== */
+console.log("🔥 DEPLOY CHECK: Smart Pay C2B routes active");
+
 /* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(express.json());
