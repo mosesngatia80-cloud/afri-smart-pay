@@ -2,15 +2,14 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 require("dotenv").config();
 
 const app = express();
 
-/* ============== MIDDLEWARE ============== */
 app.use(cors());
 app.use(express.json());
 
-/* ============== DATABASE ============== */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
@@ -19,11 +18,11 @@ mongoose
     process.exit(1);
   });
 
-/* ============== MODELS ============== */
 const WalletSchema = new mongoose.Schema(
   {
     owner: { type: String, unique: true },
-    balance: { type: Number, default: 0 }
+    balance: { type: Number, default: 0 },
+    pinHash: String
   },
   { timestamps: true }
 );
@@ -44,7 +43,6 @@ const TransactionSchema = new mongoose.Schema(
 const Wallet = mongoose.model("Wallet", WalletSchema);
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 
-/* ============== HELPERS ============== */
 async function getOrCreateWallet(owner) {
   let wallet = await Wallet.findOne({ owner });
   if (!wallet) {
@@ -53,128 +51,80 @@ async function getOrCreateWallet(owner) {
   return wallet;
 }
 
-/* ============== HEALTH ============== */
+/* 🔥 DISTINCT HEALTH (PROOF FLAG) */
 app.get("/api/health", (req, res) => {
-  res.json({ status: "Smart Pay running" });
+  res.json({ status: "PIN_VERSION_ACTIVE" });
 });
 
-/* ============== WALLET → ORDER PAYMENT ============== */
+/* 🔐 SET PIN */
+app.post("/api/wallet/set-pin", async (req, res) => {
+  const { phone, pin } = req.body;
+
+  if (!phone || !pin) {
+    return res.status(400).json({ message: "phone and pin required" });
+  }
+
+  if (!/^\d{4}$/.test(pin)) {
+    return res.status(400).json({ message: "PIN must be 4 digits" });
+  }
+
+  const wallet = await getOrCreateWallet(phone);
+  wallet.pinHash = await bcrypt.hash(pin, 10);
+  await wallet.save();
+
+  res.json({ success: true, message: "PIN set successfully" });
+});
+
+/* 💳 PIN-PROTECTED PAYMENT */
 app.post("/api/payments/wallet", async (req, res) => {
-  try {
-    const { payer, business, amount } = req.body;
+  const { payer, business, amount, pin } = req.body;
 
-    if (!payer || !business || !amount) {
-      return res.status(400).json({
-        success: false,
-        message: "payer, business and amount are required"
-      });
-    }
-
-    /* ===== Fee rules ===== */
-    let fee = 0;
-    if (amount <= 100) fee = 0;
-    else if (amount <= 1000) fee = amount * 0.005;
-    else fee = amount * 0.01;
-
-    fee = Math.min(Math.round(fee), 20);
-    const totalDebit = amount + fee;
-
-    /* ===== Wallets ===== */
-    const payerWallet = await getOrCreateWallet(payer);
-    const bizWallet = await getOrCreateWallet(business);
-    const platformWallet = await getOrCreateWallet("PLATFORM_WALLET");
-
-    if (payerWallet.balance < totalDebit) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance"
-      });
-    }
-
-    /* ===== Transfer ===== */
-    const reference =
-      "TXN_" + crypto.randomBytes(4).toString("hex").toUpperCase();
-
-    payerWallet.balance -= totalDebit;
-    bizWallet.balance += amount;
-    platformWallet.balance += fee;
-
-    await payerWallet.save();
-    await bizWallet.save();
-    await platformWallet.save();
-
-    await Transaction.create({
-      from: payer,
-      to: business,
-      amount,
-      fee,
-      reference,
-      type: "WALLET_PAYMENT",
-      raw: req.body
-    });
-
-    return res.json({
-      success: true,
-      message: "Payment successful",
-      reference,
-      amount,
-      fee,
-      balance: payerWallet.balance
-    });
-
-  } catch (err) {
-    console.error("❌ Wallet payment error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Payment failed"
-    });
+  if (!payer || !business || !amount || !pin) {
+    return res.status(400).json({ message: "missing fields" });
   }
-});
 
-/* ============== C2B VALIDATION ============== */
-app.post("/api/c2b/validation", (req, res) => {
-  res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-});
+  const payerWallet = await getOrCreateWallet(payer);
+  const bizWallet = await getOrCreateWallet(business);
+  const platformWallet = await getOrCreateWallet("PLATFORM_WALLET");
 
-/* ============== C2B CONFIRMATION ============== */
-app.post("/api/c2b/confirmation", async (req, res) => {
-  try {
-    const { TransID, TransAmount, MSISDN } = req.body;
-    if (!TransID || !TransAmount || !MSISDN) {
-      return res.json({ ResultCode: 0, ResultDesc: "Ignored" });
-    }
-
-    const exists = await Transaction.findOne({ reference: TransID });
-    if (exists) {
-      return res.json({ ResultCode: 0, ResultDesc: "Duplicate ignored" });
-    }
-
-    const wallet = await getOrCreateWallet(MSISDN);
-    wallet.balance += Number(TransAmount);
-    await wallet.save();
-
-    await Transaction.create({
-      from: "MPESA",
-      to: MSISDN,
-      amount: Number(TransAmount),
-      reference: TransID,
-      type: "C2B",
-      raw: req.body
-    });
-
-    res.json({ ResultCode: 0, ResultDesc: "Success" });
-  } catch (err) {
-    res.json({ ResultCode: 0, ResultDesc: "Handled" });
+  if (!payerWallet.pinHash) {
+    return res.status(403).json({ message: "PIN not set" });
   }
+
+  const ok = await bcrypt.compare(pin, payerWallet.pinHash);
+  if (!ok) {
+    return res.status(403).json({ message: "Invalid PIN" });
+  }
+
+  let fee = amount <= 100 ? 0 : amount <= 1000 ? amount * 0.005 : amount * 0.01;
+  fee = Math.min(Math.round(fee), 20);
+
+  if (payerWallet.balance < amount + fee) {
+    return res.status(400).json({ message: "Insufficient balance" });
+  }
+
+  const ref = "TXN_" + crypto.randomBytes(4).toString("hex").toUpperCase();
+
+  payerWallet.balance -= amount + fee;
+  bizWallet.balance += amount;
+  platformWallet.balance += fee;
+
+  await payerWallet.save();
+  await bizWallet.save();
+  await platformWallet.save();
+
+  await Transaction.create({
+    from: payer,
+    to: business,
+    amount,
+    fee,
+    reference: ref,
+    type: "WALLET_PAYMENT"
+  });
+
+  res.json({ success: true, reference: ref });
 });
 
-/* ============== QUERIES ============== */
-app.get("/api/wallet/balance/:phone", async (req, res) => {
-  const wallet = await Wallet.findOne({ owner: req.params.phone });
-  res.json({ balance: wallet ? wallet.balance : 0 });
-});
-
-/* ============== START ============== */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Smart Pay running on port ${PORT}`);
