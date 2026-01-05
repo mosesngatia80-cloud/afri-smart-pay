@@ -54,12 +54,12 @@ async function getOrCreateWallet(owner) {
   return wallet;
 }
 
-/* ============== HEALTH ============== */
+/* ============== HEALTH (FINAL SIGNATURE) ============== */
 app.get("/api/health", (req, res) => {
-  res.json({ status: "PIN_AND_PAYMENTS_ACTIVE" });
+  res.json({ status: "PIN_SET_AND_PAYMENTS_READY" });
 });
 
-/* ============== SET PIN (FINAL PATH) ============== */
+/* ============== SET PIN (FINAL) ============== */
 app.post("/api/payments/set-pin", async (req, res) => {
   try {
     const { phone, pin } = req.body;
