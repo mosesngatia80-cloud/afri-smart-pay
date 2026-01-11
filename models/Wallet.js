@@ -1,26 +1,25 @@
 const mongoose = require("mongoose");
 
-const walletSchema = new mongoose.Schema(
+const WalletSchema = new mongoose.Schema(
   {
-    phone: {
+    owner: {
       type: String,
       required: true,
-      unique: true,
+      unique: true
     },
+
+    type: {
+      type: String,
+      enum: ["USER", "BUSINESS"],
+      default: "USER"
+    },
+
     balance: {
       type: Number,
-      default: 0,
-    },
-    pin: {
-      type: String,
-      select: false, // hide by default
-    },
-    transactions: {
-      type: Array,
-      default: [],
-    },
+      default: 0
+    }
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model("Wallet", walletSchema);
+module.exports = mongoose.model("Wallet", WalletSchema);
