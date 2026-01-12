@@ -98,8 +98,40 @@ app.post("/api/payments/wallet", async (req, res) => {
   }
 });
 
+
+/* ================= C2B CALLBACKS ================= */
+
+// ROOT (heartbeat)
+app.get("/", (req, res) => {
+  res.send("AFRI SMART PAY API IS LIVE");
+});
+
+// VALIDATION
+app.post("/api/c2b/validation", (req, res) => {
+  console.log("🔥 C2B VALIDATION HIT");
+  console.log(JSON.stringify(req.body, null, 2));
+
+  return res.json({
+    ResultCode: 0,
+    ResultDesc: "Accepted"
+  });
+});
+
+// CONFIRMATION
+app.post("/api/c2b/confirmation", async (req, res) => {
+  console.log("🔥 C2B CONFIRMATION HIT");
+  console.log(JSON.stringify(req.body, null, 2));
+
+  return res.json({
+    ResultCode: 0,
+    ResultDesc: "Received"
+  });
+});
+
+
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Smart Pay running on ${PORT}`);
 });
+
