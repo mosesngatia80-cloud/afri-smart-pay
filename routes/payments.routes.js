@@ -1,7 +1,7 @@
 const express = require("express");
 
-// Force explicit path + assert
-const withdrawController = require("../controllers/withdraw.controller.js");
+// 🔑 EXPLICIT CommonJS controller
+const withdrawController = require("../controllers/withdraw.controller.cjs");
 
 console.log("WITHDRAW CONTROLLER EXPORTS:", Object.keys(withdrawController));
 
