@@ -1,6 +1,9 @@
 const Wallet = require("../models/Wallet");
 const bcrypt = require("bcryptjs");
 
+/**
+ * Create wallet OR reset PIN if wallet exists
+ */
 const createWallet = async (req, res) => {
   try {
     const { phone, pin } = req.body;
@@ -9,23 +12,29 @@ const createWallet = async (req, res) => {
       return res.status(400).json({ message: "Phone and PIN are required" });
     }
 
-    const existing = await Wallet.findOne({ phone });
-    if (existing) {
+    const pinHash = await bcrypt.hash(pin.toString(), 10);
+
+    let wallet = await Wallet.findOne({ phone });
+
+    // 🔑 WALLET EXISTS → RESET PIN
+    if (wallet) {
+      wallet.pinHash = pinHash;
+      await wallet.save();
+
       return res.status(200).json({
-        message: "Wallet already exists",
+        message: "Wallet PIN updated",
         wallet: {
-          phone: existing.phone,
-          balance: existing.balance
+          phone: wallet.phone,
+          balance: wallet.balance
         }
       });
     }
 
-    const hashedPin = await bcrypt.hash(pin.toString(), 10);
-
-    const wallet = await Wallet.create({
+    // 🔑 WALLET DOES NOT EXIST → CREATE
+    wallet = await Wallet.create({
       phone,
-      pin: hashedPin,
-      balance: 0
+      balance: 0,
+      pinHash
     });
 
     return res.status(201).json({
