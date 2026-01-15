@@ -1,13 +1,20 @@
 const express = require("express");
-const {
-  withdraw,
-  withdrawPreview
-} = require("../controllers/withdraw.controller");
+
+// Force explicit path + assert
+const withdrawController = require("../controllers/withdraw.controller.js");
+
+console.log("WITHDRAW CONTROLLER EXPORTS:", Object.keys(withdrawController));
+
+const { withdraw, withdrawPreview } = withdrawController;
+
+if (typeof withdraw !== "function" || typeof withdrawPreview !== "function") {
+  throw new Error("❌ Withdraw controllers are undefined at runtime");
+}
 
 const {
   getLedger,
   getLedgerByReference
-} = require("../controllers/ledger.controller");
+} = require("../controllers/ledger.controller.js");
 
 const router = express.Router();
 
