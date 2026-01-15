@@ -1,167 +1,96 @@
-const bcrypt = require("bcryptjs");
 const Wallet = require("../models/Wallet");
+const { writeLedger } = require("../utils/ledger");
+const { calculateWithdrawFee } = require("../utils/fees");
+const { checkWithdrawLimits } = require("../utils/limits");
+const bcrypt = require("bcryptjs");
 
-// 🔑 FIXED: explicit extensions for CJS
-const { writeLedger } = require("../utils/ledger.js");
-const { calculateWithdrawFee } = require("../utils/fees.js");
-const {
-  MAX_WITHDRAW_PER_TX,
-  MAX_WITHDRAW_PER_DAY,
-  getTodayWithdrawTotal
-} = require("../utils/limits.js");
-
-const sendB2C = require("../utils/mpesaB2C.cjs");
-
-/**
- * =========================
- * WITHDRAW FUNDS
- * =========================
- */
-async function withdraw(req, res) {
-  try {
-    const { phone, amount, pin } = req.body;
-
-    if (!phone || !amount || !pin) {
-      return res.status(400).json({ message: "Missing fields" });
-    }
-
-    if (amount <= 0) {
-      return res.status(400).json({ message: "Invalid amount" });
-    }
-
-    if (amount > MAX_WITHDRAW_PER_TX) {
-      return res.status(400).json({
-        message: "Per-transaction limit exceeded",
-        limit: MAX_WITHDRAW_PER_TX
-      });
-    }
-
-    const todayTotal = await getTodayWithdrawTotal(phone);
-    if (todayTotal + amount > MAX_WITHDRAW_PER_DAY) {
-      return res.status(400).json({
-        message: "Daily withdrawal limit exceeded",
-        usedToday: todayTotal,
-        limit: MAX_WITHDRAW_PER_DAY
-      });
-    }
-
-    const wallet = await Wallet.findOne({ owner: phone });
-    if (!wallet) {
-      return res.status(404).json({ message: "Wallet not found" });
-    }
-
-    const pinOk = await bcrypt.compare(pin, wallet.pinHash);
-    if (!pinOk) {
-      return res.status(401).json({ message: "Invalid PIN" });
-    }
-
-    const fee = calculateWithdrawFee(amount, wallet.walletType);
-    const totalDebit = amount + fee;
-
-    if (wallet.balance < totalDebit) {
-      return res.status(400).json({
-        message: "Insufficient balance",
-        required: totalDebit,
-        balance: wallet.balance
-      });
-    }
-
-    const before = wallet.balance;
-    wallet.balance -= totalDebit;
-    await wallet.save();
-
-    const reference =
-      "WD_" + Math.random().toString(16).slice(2, 10).toUpperCase();
-
-    await writeLedger({
-      owner: phone,
-      type: "WITHDRAW",
-      amount,
-      reference,
-      balanceBefore: before,
-      balanceAfter: before - amount,
-      status: "QUEUED"
-    });
-
-    if (fee > 0) {
-      await writeLedger({
-        owner: phone,
-        type: "FEE",
-        amount: fee,
-        reference: reference + "_FEE",
-        balanceBefore: before - amount,
-        balanceAfter: wallet.balance,
-        status: "QUEUED"
-      });
-    }
-
-    await sendB2C({
-      phone,
-      amount,
-      remarks: "Smart Pay Withdrawal",
-      occasion: "SMARTPAY_WITHDRAW",
-      reference
-    });
-
-    res.json({
-      success: true,
-      message: "Withdrawal queued",
-      amount,
-      fee,
-      totalDebited: totalDebit,
-      reference
-    });
-  } catch (err) {
-    console.error("WITHDRAW ERROR:", err);
-    res.status(500).json({ message: "Withdrawal failed" });
-  }
-}
-
-/**
- * =========================
- * WITHDRAW PREVIEW
- * =========================
- */
-async function withdrawPreview(req, res) {
+/* =========================
+   PREVIEW WITHDRAW
+========================= */
+exports.withdrawPreview = async (req, res) => {
   try {
     const { phone, amount } = req.body;
 
     if (!phone || !amount || amount <= 0) {
-      return res.status(400).json({ message: "phone and valid amount required" });
+      return res.status(400).json({ message: "Invalid request" });
     }
 
-    const wallet = await Wallet.findOne({ owner: phone });
+    const wallet = await Wallet.findOne({ phone });
     if (!wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
 
-    const fee = calculateWithdrawFee(amount, wallet.walletType);
-    const totalDebited = amount + fee;
+    const fee = calculateWithdrawFee(amount);
+    const allowed = checkWithdrawLimits(wallet, amount);
 
-    if (wallet.balance < totalDebited) {
-      return res.status(400).json({
-        message: "Insufficient balance",
-        required: totalDebited,
-        balance: wallet.balance
-      });
+    if (!allowed) {
+      return res.status(403).json({ message: "Withdrawal limit exceeded" });
+    }
+
+    if (wallet.balance < amount + fee) {
+      return res.status(400).json({ message: "Insufficient balance" });
     }
 
     res.json({
-      success: true,
       amount,
       fee,
-      totalDebited,
-      netPayout: amount,
+      netAmount: amount - fee,
       balance: wallet.balance,
-      walletType: wallet.walletType
+      allowed: true
     });
   } catch (err) {
-    console.error("WITHDRAW PREVIEW ERROR:", err);
-    res.status(500).json({ message: "Preview failed" });
+    console.error("Withdraw preview error:", err);
+    res.status(500).json({ message: "Server error" });
   }
-}
+};
 
-module.exports = {
-  withdraw,
-  withdrawPreview
+/* =========================
+   EXECUTE WITHDRAW
+========================= */
+exports.withdraw = async (req, res) => {
+  try {
+    const { phone, amount, pin } = req.body;
+
+    if (!phone || !amount || !pin) {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    const wallet = await Wallet.findOne({ phone }).select("+pinHash");
+    if (!wallet) {
+      return res.status(404).json({ message: "Wallet not found" });
+    }
+
+    const pinValid = await bcrypt.compare(pin, wallet.pinHash);
+    if (!pinValid) {
+      return res.status(403).json({ message: "Invalid PIN" });
+    }
+
+    const fee = calculateWithdrawFee(amount);
+    const total = amount + fee;
+
+    if (wallet.balance < total) {
+      return res.status(400).json({ message: "Insufficient balance" });
+    }
+
+    wallet.balance -= total;
+    await wallet.save();
+
+    await writeLedger({
+      phone,
+      type: "WITHDRAW",
+      amount,
+      fee,
+      balanceAfter: wallet.balance
+    });
+
+    res.json({
+      message: "Withdrawal successful",
+      amount,
+      fee,
+      balance: wallet.balance
+    });
+  } catch (err) {
+    console.error("Withdraw error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
