@@ -9,9 +9,12 @@ const bcrypt = require("bcryptjs");
 ========================= */
 exports.withdrawPreview = async (req, res) => {
   try {
-    const { phone, amount } = req.body;
+    let { phone, amount } = req.body;
 
-    if (!phone || !amount || amount <= 0) {
+    // 🔑 FORCE NUMBER (CRITICAL FIX)
+    amount = Number(amount);
+
+    if (!phone || Number.isNaN(amount) || amount <= 0) {
       return res.status(400).json({ message: "Invalid request" });
     }
 
@@ -31,7 +34,7 @@ exports.withdrawPreview = async (req, res) => {
       return res.status(400).json({ message: "Insufficient balance" });
     }
 
-    res.json({
+    return res.json({
       amount,
       fee,
       netAmount: amount - fee,
@@ -39,8 +42,8 @@ exports.withdrawPreview = async (req, res) => {
       allowed: true
     });
   } catch (err) {
-    console.error("Withdraw preview error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("❌ Withdraw preview error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -49,9 +52,12 @@ exports.withdrawPreview = async (req, res) => {
 ========================= */
 exports.withdraw = async (req, res) => {
   try {
-    const { phone, amount, pin } = req.body;
+    let { phone, amount, pin } = req.body;
 
-    if (!phone || !amount || !pin) {
+    // 🔑 FORCE NUMBER
+    amount = Number(amount);
+
+    if (!phone || Number.isNaN(amount) || amount <= 0 || !pin) {
       return res.status(400).json({ message: "Invalid request" });
     }
 
@@ -83,14 +89,14 @@ exports.withdraw = async (req, res) => {
       balanceAfter: wallet.balance
     });
 
-    res.json({
+    return res.json({
       message: "Withdrawal successful",
       amount,
       fee,
       balance: wallet.balance
     });
   } catch (err) {
-    console.error("Withdraw error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error("❌ Withdraw error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 };
