@@ -22,10 +22,16 @@ app.get("/api/health", (req, res) => {
 
 /* ================= ROUTES ================= */
 const paymentsRoutes = require("./routes/payments.routes");
+const mpesaRoutes = require("./routes/mpesa.routes");
+
+// Core payment routes
 app.use("/api/payments", paymentsRoutes);
+
+// M-PESA (C2B + B2C callbacks)
+app.use("/api/c2b", mpesaRoutes);
 
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Smart Pay running on ${PORT}`);
+  console.log(`🚀 Smart Pay running on port ${PORT}`);
 });
