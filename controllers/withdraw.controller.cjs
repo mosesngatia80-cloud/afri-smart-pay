@@ -1,12 +1,15 @@
 const bcrypt = require("bcryptjs");
 const Wallet = require("../models/Wallet");
-const { writeLedger } = require("../utils/ledger");
-const { calculateWithdrawFee } = require("../utils/fees");
+
+// 🔑 FIXED: explicit extensions for CJS
+const { writeLedger } = require("../utils/ledger.js");
+const { calculateWithdrawFee } = require("../utils/fees.js");
 const {
   MAX_WITHDRAW_PER_TX,
   MAX_WITHDRAW_PER_DAY,
   getTodayWithdrawTotal
-} = require("../utils/limits");
+} = require("../utils/limits.js");
+
 const sendB2C = require("../utils/mpesaB2C.cjs");
 
 /**
@@ -52,7 +55,6 @@ async function withdraw(req, res) {
       return res.status(401).json({ message: "Invalid PIN" });
     }
 
-    // ✅ EXISTING FEE LOGIC (UNCHANGED)
     const fee = calculateWithdrawFee(amount, wallet.walletType);
     const totalDebit = amount + fee;
 
@@ -64,9 +66,6 @@ async function withdraw(req, res) {
       });
     }
 
-    // ======================
-    // WALLET DEBIT
-    // ======================
     const before = wallet.balance;
     wallet.balance -= totalDebit;
     await wallet.save();
@@ -74,9 +73,6 @@ async function withdraw(req, res) {
     const reference =
       "WD_" + Math.random().toString(16).slice(2, 10).toUpperCase();
 
-    // ======================
-    // LEDGER (NOW ASYNC-SAFE)
-    // ======================
     await writeLedger({
       owner: phone,
       type: "WITHDRAW",
@@ -99,9 +95,6 @@ async function withdraw(req, res) {
       });
     }
 
-    // ======================
-    // SEND M-PESA B2C
-    // ======================
     await sendB2C({
       phone,
       amount,
@@ -118,13 +111,17 @@ async function withdraw(req, res) {
       totalDebited: totalDebit,
       reference
     });
-  } catch (e) {
-    console.error("WITHDRAW ERROR:", e);
+  } catch (err) {
+    console.error("WITHDRAW ERROR:", err);
     res.status(500).json({ message: "Withdrawal failed" });
   }
 }
 
-/* ================= WITHDRAW PREVIEW ================= */
+/**
+ * =========================
+ * WITHDRAW PREVIEW
+ * =========================
+ */
 async function withdrawPreview(req, res) {
   try {
     const { phone, amount } = req.body;
@@ -158,8 +155,8 @@ async function withdrawPreview(req, res) {
       balance: wallet.balance,
       walletType: wallet.walletType
     });
-  } catch (e) {
-    console.error("WITHDRAW PREVIEW ERROR:", e);
+  } catch (err) {
+    console.error("WITHDRAW PREVIEW ERROR:", err);
     res.status(500).json({ message: "Preview failed" });
   }
 }
