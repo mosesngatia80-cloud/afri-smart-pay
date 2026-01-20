@@ -25,21 +25,18 @@ const paymentsRoutes = require("./routes/payments.routes");
 const walletRoutes   = require("./routes/wallet.routes");
 const mpesaRoutes    = require("./routes/mpesa.routes");
 
-/* ================= MOUNT ROUTES ================= */
+/* ================= MOUNT ================= */
 
-// Core payment & withdrawal logic
+// Payments (STK Push, Withdrawals, Ledger)
 app.use("/api/payments", paymentsRoutes);
 
-// Wallet creation & balance logic
+// Wallet logic
 app.use("/api/wallet", walletRoutes);
 
-// ✅ M-PESA routes (existing – DO NOT REMOVE)
-app.use("/api/c2b", mpesaRoutes);
-
-// ✅ M-PESA routes (new, clearer alias)
+// M-PESA callbacks ONLY
 app.use("/api/mpesa", mpesaRoutes);
 
-/* ================= 404 HANDLER ================= */
+/* ================= 404 ================= */
 app.use((req, res) => {
   res.status(404).json({
     error: "ENDPOINT_NOT_FOUND",

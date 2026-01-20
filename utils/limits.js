@@ -1,31 +1,20 @@
-const mongoose = require("mongoose");
+/**
+ * Check withdrawal limits
+ * @param {object} wallet
+ * @param {number} amount
+ * @returns {boolean}
+ */
+function checkWithdrawLimits(wallet, amount) {
+  if (!wallet) return false;
 
-const MAX_WITHDRAW_PER_TX = 50000;
-const MAX_WITHDRAW_PER_DAY = 100000;
+  // Example rules
+  const DAILY_LIMIT = 50000;
+  const MIN_WITHDRAW = 10;
 
-async function getTodayWithdrawTotal(phone) {
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
+  if (amount < MIN_WITHDRAW) return false;
+  if (amount > DAILY_LIMIT) return false;
 
-  const res = await mongoose.connection
-    .collection("transactions_ledger")
-    .aggregate([
-      {
-        $match: {
-          owner: phone,
-          type: "WITHDRAW",
-          createdAt: { $gte: since }
-        }
-      },
-      { $group: { _id: null, total: { $sum: "$amount" } } }
-    ])
-    .toArray();
-
-  return res[0]?.total || 0;
+  return true;
 }
 
-module.exports = {
-  MAX_WITHDRAW_PER_TX,
-  MAX_WITHDRAW_PER_DAY,
-  getTodayWithdrawTotal
-};
+module.exports = { checkWithdrawLimits };

@@ -5,8 +5,14 @@ const {
 } = require("../controllers/mpesa.controller.js");
 
 const { b2cCallback } = require("../controllers/mpesa.callback.controller");
+const { stkPush } = require("../controllers/mpesa.stkpush.controller");
 
 const router = express.Router();
+
+// =========================
+// STK PUSH (C2B Initiation)
+// =========================
+router.post("/stk-push", stkPush);
 
 // =========================
 // Daraja C2B callbacks

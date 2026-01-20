@@ -1,6 +1,8 @@
 const express = require("express");
 
-// 🔑 EXPLICIT CommonJS controller
+/* =========================
+   WITHDRAW CONTROLLER (CJS)
+========================= */
 const withdrawController = require("../controllers/withdraw.controller.cjs");
 
 console.log("WITHDRAW CONTROLLER EXPORTS:", Object.keys(withdrawController));
@@ -11,22 +13,40 @@ if (typeof withdraw !== "function" || typeof withdrawPreview !== "function") {
   throw new Error("❌ Withdraw controllers are undefined at runtime");
 }
 
+/* =========================
+   LEDGER CONTROLLER
+========================= */
 const {
   getLedger,
   getLedgerByReference
 } = require("../controllers/ledger.controller.js");
 
+/* =========================
+   M-PESA STK PUSH CONTROLLER
+========================= */
+const {
+  stkPush
+} = require("../controllers/mpesa.stk.controller");
+
+/* =========================
+   ROUTER
+========================= */
 const router = express.Router();
 
-// =========================
-// Withdrawals
-// =========================
+/* =========================
+   STK PUSH (C2B – PAY IN)
+========================= */
+router.post("/stk-push", stkPush);
+
+/* =========================
+   WITHDRAWALS (B2C – PAY OUT)
+========================= */
 router.post("/withdraw/preview", withdrawPreview);
 router.post("/withdraw", withdraw);
 
-// =========================
-// Ledger (read-only)
-// =========================
+/* =========================
+   LEDGER (READ ONLY)
+========================= */
 router.get("/ledger", getLedger);
 router.get("/ledger/:reference", getLedgerByReference);
 
