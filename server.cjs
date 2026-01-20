@@ -4,7 +4,10 @@ require("dotenv").config();
 
 /* ================= APP ================= */
 const app = express();
+
+// Required for JSON + M-PESA callbacks
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 /* ================= DATABASE ================= */
 mongoose
@@ -27,14 +30,17 @@ const mpesaRoutes    = require("./routes/mpesa.routes");
 
 /* ================= MOUNT ================= */
 
-// Payments (STK Push, Withdrawals, Ledger)
+// Payments (withdrawals, ledger)
 app.use("/api/payments", paymentsRoutes);
 
 // Wallet logic
 app.use("/api/wallet", walletRoutes);
 
-// M-PESA callbacks ONLY
+// MPESA: STK Push + callbacks
 app.use("/api/mpesa", mpesaRoutes);
+
+// Debug log (important)
+console.log("✅ MPESA routes mounted at /api/mpesa");
 
 /* ================= 404 ================= */
 app.use((req, res) => {
