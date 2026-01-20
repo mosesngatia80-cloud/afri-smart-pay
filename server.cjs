@@ -33,8 +33,11 @@ app.use("/api/payments", paymentsRoutes);
 // Wallet creation & balance logic
 app.use("/api/wallet", walletRoutes);
 
-// M-PESA (C2B + B2C callbacks)
+// ✅ M-PESA routes (existing – DO NOT REMOVE)
 app.use("/api/c2b", mpesaRoutes);
+
+// ✅ M-PESA routes (new, clearer alias)
+app.use("/api/mpesa", mpesaRoutes);
 
 /* ================= 404 HANDLER ================= */
 app.use((req, res) => {
