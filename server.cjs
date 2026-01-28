@@ -27,6 +27,7 @@ app.get("/api/health", (req, res) => {
 const paymentsRoutes = require("./routes/payments.routes");
 const walletRoutes   = require("./routes/wallet.routes");
 const mpesaRoutes    = require("./routes/mpesa.routes");
+const c2bRoutes      = require("./routes/c2b.routes"); // ✅ ADDED
 
 /* ================= MOUNT ================= */
 
@@ -39,8 +40,11 @@ app.use("/api/wallet", walletRoutes);
 // MPESA: STK Push + callbacks
 app.use("/api/mpesa", mpesaRoutes);
 
-// Debug log (important)
+// MPESA C2B: Validation + Confirmation (✅ ADDED)
+app.use("/api/c2b", c2bRoutes);
+
 console.log("✅ MPESA routes mounted at /api/mpesa");
+console.log("✅ C2B routes mounted at /api/c2b");
 
 /* ================= 404 ================= */
 app.use((req, res) => {
