@@ -45,7 +45,14 @@ app.use((req, res) => {
   });
 });
 
-/* ================= DATABASE + START ================= */
+/* ================= START SERVER FIRST (RENDER SAFE) ================= */
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Smart Pay running on port ${PORT}`);
+});
+
+/* ================= DATABASE (NON-BLOCKING) ================= */
 console.log("🟡 Connecting to MongoDB...");
 
 mongoose
@@ -55,13 +62,7 @@ mongoose
   })
   .then(() => {
     console.log("✅ Smart Pay DB connected");
-
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Smart Pay running on port ${PORT}`);
-    });
   })
   .catch(err => {
     console.error("❌ DB error:", err.message);
-    process.exit(1);
   });
