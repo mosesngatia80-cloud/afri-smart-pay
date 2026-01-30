@@ -3,9 +3,8 @@ const router = express.Router();
 const mongoose = require("mongoose");
 
 /* ===========================
-   MODELS
+   MODELS (SMART PAY ONLY)
 =========================== */
-const Order = require("../models/Order");
 const Wallet = require("../models/Wallet");
 
 /* ===========================
@@ -24,66 +23,57 @@ const C2BLog =
   mongoose.models.C2BLog || mongoose.model("C2BLog", C2BLogSchema);
 
 /* ===========================
-   CONFIRMATION ENDPOINT
+   C2B CONFIRMATION ENDPOINT
 =========================== */
 router.post("/confirmation", (req, res) => {
-  // 🔐 IMMEDIATE ACK — NEVER FAIL SAFARICOM
+  // ✅ IMMEDIATE ACK — NEVER FAIL SAFARICOM
   res.json({ ResultCode: 0, ResultDesc: "Success" });
 
-  // 🔁 NON-BLOCKING PROCESSING
+  // 🔁 ASYNC NON-BLOCKING PROCESSING
   setImmediate(async () => {
     try {
       const data = req.body || {};
+
       console.log("💰 C2B CONFIRMATION:", JSON.stringify(data));
 
-      // 1️⃣ LOG EVERYTHING (AUDIT TRAIL)
+      // 1️⃣ LOG EVERY CALLBACK (NO FILTERING, NO DEDUP)
       await C2BLog.create({
         transId: data.TransID || "UNKNOWN",
-        payload: data
+        payload: data,
+        receivedAt: new Date()
       });
 
       const amount = Number(data.TransAmount);
-      const phone  = data.MSISDN;
-      const now    = new Date();
+      const shortcode = data.BusinessShortCode;
 
-      if (!amount || !phone) {
-        console.log("⚠️ Missing amount or phone, skipping reconciliation");
+      if (!amount || !shortcode) {
+        console.log("⚠️ Missing amount or shortcode — logged only");
         return;
       }
 
-      // 2️⃣ FIND MATCHING UNPAID ORDER (5-MIN WINDOW)
-      const order = await Order.findOne({
-        customerPhone: phone,
-        total: amount,
-        status: "UNPAID",
-        createdAt: { $gte: new Date(now.getTime() - 5 * 60 * 1000) }
-      });
-
-      if (order) {
-        // ✅ ORDER PAYMENT
-        order.status = "PAID";
-        order.paymentRef = data.TransID;
-        order.paidAt = now;
-        await order.save();
-
-        console.log("✅ ORDER PAID:", order._id.toString());
-        return;
-      }
-
-      // 3️⃣ NO ORDER → FUND BUSINESS WALLET
+      // 2️⃣ FUND BUSINESS WALLET (SMART PAY RESPONSIBILITY)
       const wallet = await Wallet.findOne({
-        ownerType: "BUSINESS"
+        ownerType: "BUSINESS",
+        shortcode
       });
 
       if (!wallet) {
-        console.log("❌ No business wallet found");
+        console.log("⚠️ No business wallet found for shortcode:", shortcode);
         return;
       }
 
       wallet.balance += amount;
       await wallet.save();
 
-      console.log("💳 WALLET FUNDED:", amount);
+      console.log("💳 WALLET FUNDED:", {
+        walletId: wallet._id.toString(),
+        amount
+      });
+
+      // 3️⃣ (OPTIONAL — PHASE 2)
+      // Emit event or notify Smart Biz via API
+      // Example:
+      // await fetch("https://smartbiz/api/internal/payment-event", {...})
 
     } catch (err) {
       console.error("❌ C2B PROCESSING ERROR:", err.message);
@@ -92,7 +82,7 @@ router.post("/confirmation", (req, res) => {
 });
 
 /* ===========================
-   VALIDATION ENDPOINT
+   C2B VALIDATION ENDPOINT
 =========================== */
 router.post("/validation", (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: "Success" });
