@@ -4,17 +4,16 @@ const mongoose = require("mongoose");
 
 /* ===========================
    MODELS
-   =========================== */
+=========================== */
+const Order = require("../models/Order");
 const Wallet = require("../models/Wallet");
 
 /* ===========================
-   RAW CALLBACK STORAGE MODEL
-   =========================== */
+   RAW CALLBACK LOG (AUDIT)
+=========================== */
 const C2BLogSchema = new mongoose.Schema(
   {
-    transId: { type: String, index: true, unique: true },
-    amount: Number,
-    shortCode: String,
+    transId: { type: String, index: true },
     payload: Object,
     receivedAt: { type: Date, default: Date.now }
   },
@@ -26,59 +25,65 @@ const C2BLog =
 
 /* ===========================
    CONFIRMATION ENDPOINT
-   =========================== */
+=========================== */
 router.post("/confirmation", (req, res) => {
-  // 1️⃣ IMMEDIATE ACK TO SAFARICOM (DO NOT BLOCK)
+  // 🔐 IMMEDIATE ACK — NEVER FAIL SAFARICOM
   res.json({ ResultCode: 0, ResultDesc: "Success" });
 
-  // 2️⃣ PROCESS ASYNC (SAFE FOR HIGH VOLUME)
+  // 🔁 NON-BLOCKING PROCESSING
   setImmediate(async () => {
     try {
       const data = req.body || {};
+      console.log("💰 C2B CONFIRMATION:", JSON.stringify(data));
 
-      console.log("💰 C2B CONFIRMATION RECEIVED:", JSON.stringify(data));
-
-      const transId = data.TransID;
-      const amount = Number(data.TransAmount || 0);
-      const shortCode = data.BusinessShortCode;
-
-      if (!transId || !amount || !shortCode) {
-        console.warn("⚠️ Invalid C2B payload, skipping credit");
-        return;
-      }
-
-      // 3️⃣ IDEMPOTENCY CHECK (NO DOUBLE CREDIT)
-      const exists = await C2BLog.findOne({ transId });
-      if (exists) {
-        console.log("🔁 Duplicate callback ignored:", transId);
-        return;
-      }
-
-      // 4️⃣ STORE RAW CALLBACK (AUDIT / CBK SAFE)
+      // 1️⃣ LOG EVERYTHING (AUDIT TRAIL)
       await C2BLog.create({
-        transId,
-        amount,
-        shortCode,
+        transId: data.TransID || "UNKNOWN",
         payload: data
       });
 
-      // 5️⃣ CREDIT BUSINESS WALLET (BY TILL SHORTCODE)
+      const amount = Number(data.TransAmount);
+      const phone  = data.MSISDN;
+      const now    = new Date();
+
+      if (!amount || !phone) {
+        console.log("⚠️ Missing amount or phone, skipping reconciliation");
+        return;
+      }
+
+      // 2️⃣ FIND MATCHING UNPAID ORDER (5-MIN WINDOW)
+      const order = await Order.findOne({
+        customerPhone: phone,
+        total: amount,
+        status: "UNPAID",
+        createdAt: { $gte: new Date(now.getTime() - 5 * 60 * 1000) }
+      });
+
+      if (order) {
+        // ✅ ORDER PAYMENT
+        order.status = "PAID";
+        order.paymentRef = data.TransID;
+        order.paidAt = now;
+        await order.save();
+
+        console.log("✅ ORDER PAID:", order._id.toString());
+        return;
+      }
+
+      // 3️⃣ NO ORDER → FUND BUSINESS WALLET
       const wallet = await Wallet.findOne({
-        ownerType: "BUSINESS",
-        mpesaShortCode: shortCode
+        ownerType: "BUSINESS"
       });
 
       if (!wallet) {
-        console.error("❌ No wallet mapped to shortcode:", shortCode);
+        console.log("❌ No business wallet found");
         return;
       }
 
       wallet.balance += amount;
       await wallet.save();
 
-      console.log(
-        `✅ Wallet credited | Wallet=${wallet._id} | Amount=${amount}`
-      );
+      console.log("💳 WALLET FUNDED:", amount);
 
     } catch (err) {
       console.error("❌ C2B PROCESSING ERROR:", err.message);
@@ -88,7 +93,7 @@ router.post("/confirmation", (req, res) => {
 
 /* ===========================
    VALIDATION ENDPOINT
-   =========================== */
+=========================== */
 router.post("/validation", (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: "Success" });
 });
