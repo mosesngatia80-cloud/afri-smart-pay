@@ -14,6 +14,12 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "SMART_PAY_OK" });
 });
 
+/* 🔽 ADDED (ALIAS ONLY — NO EXISTING CODE TOUCHED) */
+app.get("/health", (req, res) => {
+  res.json({ status: "SMART_PAY_OK" });
+});
+/* 🔼 END ADD */
+
 /* ================= ROUTES ================= */
 const paymentsRoutes = require("./routes/payments.routes");
 const walletRoutes   = require("./routes/wallet.routes");
