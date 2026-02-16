@@ -14,22 +14,9 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "SMART_PAY_OK" });
 });
 
-/* 🔽 ADDED (ALIAS ONLY — NO EXISTING CODE TOUCHED) */
+/* ALIAS (NO LOGIC CHANGE) */
 app.get("/health", (req, res) => {
   res.json({ status: "SMART_PAY_OK" });
-});
-/* 🔼 END ADD */
-
-/* ================= RAW C2B VISIBILITY (NO LOGIC) ================= */
-app.use((req, res, next) => {
-  if (req.originalUrl.startsWith("/api/c2b")) {
-    console.log("🔥 INCOMING C2B REQUEST");
-    console.log("METHOD:", req.method);
-    console.log("URL:", req.originalUrl);
-    console.log("HEADERS:", JSON.stringify(req.headers, null, 2));
-    console.log("BODY:", JSON.stringify(req.body, null, 2));
-  }
-  next();
 });
 
 /* ================= ROUTES ================= */
@@ -40,20 +27,13 @@ const c2bRoutes      = require("./routes/c2b.routes");
 
 /* ================= MOUNT ================= */
 
-// Payments (withdrawals, ledger)
 app.use("/api/payments", paymentsRoutes);
-
-// Wallet logic
 app.use("/api/wallet", walletRoutes);
-
-// MPESA: STK Push + callbacks
 app.use("/api/mpesa", mpesaRoutes);
-
-// MPESA C2B: Validation + Confirmation
 app.use("/api/c2b", c2bRoutes);
 
-console.log("✅ MPESA routes mounted at /api/mpesa");
-console.log("✅ C2B routes mounted at /api/c2b");
+console.log("MPESA routes mounted at /api/mpesa");
+console.log("C2B routes mounted at /api/c2b");
 
 /* ================= 404 ================= */
 app.use((req, res) => {
@@ -63,15 +43,15 @@ app.use((req, res) => {
   });
 });
 
-/* ================= START SERVER FIRST (RENDER SAFE) ================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(\`🚀 Smart Pay running on port \${PORT}\`);
+  console.log("Smart Pay running on port " + PORT);
 });
 
-/* ================= DATABASE (NON-BLOCKING) ================= */
-console.log("🟡 Connecting to MongoDB...");
+/* ================= DATABASE ================= */
+console.log("Connecting to MongoDB...");
 
 mongoose
   .connect(process.env.MONGO_URI, {
@@ -79,8 +59,8 @@ mongoose
     serverSelectionTimeoutMS: 10000
   })
   .then(() => {
-    console.log("✅ Smart Pay DB connected");
+    console.log("Smart Pay DB connected");
   })
   .catch(err => {
-    console.error("❌ DB error:", err.message);
+    console.error("DB error:", err.message);
   });
