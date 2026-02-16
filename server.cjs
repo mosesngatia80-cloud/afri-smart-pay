@@ -1,3 +1,5 @@
+console.log("🔥 SERVER.CJS LOADED AT", new Date().toISOString());
+
 const express = require("express");
 const mongoose = require("mongoose");
 require("dotenv").config();
