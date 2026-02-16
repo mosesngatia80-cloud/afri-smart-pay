@@ -1,28 +1,36 @@
 const express = require("express");
+
 const {
-  mpesaValidation,
-  mpesaConfirmation
+  mpesaValidation
 } = require("../controllers/mpesa.controller.js");
 
-const { b2cCallback } = require("../controllers/mpesa.callback.controller");
+const {
+  mpesaConfirmation
+} = require("../controllers/mpesa.confirmation.controller");
+
 const { stkPush } = require("../controllers/mpesa.stkpush.controller");
+const { b2cCallback } = require("../controllers/mpesa.callback.controller");
+
+/* ✅ NEW – WALLET FUNDING CONFIRMATION (ADDED ONLY) */
+const {
+  mpesaWalletConfirmation
+} = require("../controllers/mpesa.wallet.confirmation.controller");
 
 const router = express.Router();
 
 // =========================
-// STK PUSH (C2B Initiation)
+// STK PUSH
 // =========================
 router.post("/stk-push", stkPush);
 
 // =========================
-// Daraja C2B callbacks
+// SAFARICOM CALLBACKS
 // =========================
 router.post("/validation", mpesaValidation);
 router.post("/confirmation", mpesaConfirmation);
-
-// =========================
-// Daraja B2C callback
-// =========================
 router.post("/b2c/callback", b2cCallback);
+
+/* ✅ NEW – WALLET FUNDING CALLBACK */
+router.post("/confirmation/wallet", mpesaWalletConfirmation);
 
 module.exports = router;

@@ -1,10 +1,12 @@
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
+const fetch = require("node-fetch");
 
 /* ===========================
    RAW CALLBACK LOG (AUDIT)
-   DO NOT ADD BUSINESS LOGIC HERE
+   SMART PAY IS A PAYMENT RAIL
+   NO BUSINESS LOGIC HERE
 =========================== */
 const C2BLogSchema = new mongoose.Schema(
   {
@@ -25,15 +27,13 @@ const C2BLog =
 router.post("/confirmation", async (req, res) => {
   const data = req.body || {};
 
-  // 🔴 1️⃣ ALWAYS LOG — THIS PROVES CALLBACK RECEIPT
+  /* 1️⃣ ALWAYS LOG (PROOF OF CALLBACK) */
   console.log("💰 C2B CONFIRMATION RECEIVED:", JSON.stringify(data));
 
-  // 🔴 2️⃣ ACK SAFARICOM IMMEDIATELY (CRITICAL)
-  // Never block, never validate, never throw
+  /* 2️⃣ ACK SAFARICOM IMMEDIATELY (NEVER FAIL) */
   res.json({ ResultCode: 0, ResultDesc: "Success" });
 
-  // 🟡 3️⃣ BACKGROUND STORAGE (AUDIT TRAIL)
-  // No business logic here by design
+  /* 3️⃣ AUDIT STORAGE (NON-BLOCKING) */
   try {
     await C2BLog.create({
       transId: data.TransID || "UNKNOWN",
@@ -41,10 +41,39 @@ router.post("/confirmation", async (req, res) => {
       receivedAt: new Date()
     });
 
-    console.log("📦 C2B CALLBACK STORED (AUDIT ONLY)");
+    console.log("📦 C2B CALLBACK STORED (AUDIT)");
   } catch (err) {
-    // Even storage errors must NOT affect Safaricom
     console.error("❌ C2B STORAGE ERROR:", err.message);
+  }
+
+  /* 4️⃣ FORWARD EVENT TO SMART BIZ (INTERNAL) */
+  try {
+    if (!process.env.SMART_BIZ_URL || !process.env.CT_INTERNAL_KEY) {
+      console.log("⚠️ Smart Biz integration not configured");
+      return;
+    }
+
+    await fetch(
+      `${process.env.SMART_BIZ_URL}/api/internal/orders/mark-paid`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-key": process.env.CT_INTERNAL_KEY
+        },
+        body: JSON.stringify({
+          transId: data.TransID,
+          amount: data.TransAmount,
+          phone: data.MSISDN,
+          raw: data
+        })
+      }
+    );
+
+    console.log("🔁 PAYMENT EVENT FORWARDED TO SMART BIZ");
+  } catch (err) {
+    // Never affect Safaricom or Smart Pay uptime
+    console.error("❌ SMART BIZ FORWARD ERROR:", err.message);
   }
 });
 
@@ -54,8 +83,6 @@ router.post("/confirmation", async (req, res) => {
 =========================== */
 router.post("/validation", (req, res) => {
   console.log("🟡 C2B VALIDATION HIT:", JSON.stringify(req.body));
-
-  // Always approve at Smart Pay layer
   res.json({ ResultCode: 0, ResultDesc: "Success" });
 });
 
