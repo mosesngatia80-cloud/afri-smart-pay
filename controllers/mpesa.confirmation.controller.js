@@ -1,16 +1,22 @@
 const axios = require("axios");
 const MpesaTransaction = require("../models/MpesaTransaction");
 
+/* 🔥 VISIBILITY — FILE LOADED (NO LOGIC CHANGE) */
+console.log("🔥 MPESA CONFIRMATION CONTROLLER LOADED");
+
 /* 🔽 ADDED (SMART PAY) — NO EXISTING CODE TOUCHED */
 const Wallet = require("../models/Wallet");
 const Transaction = require("../models/Transaction");
 /* 🔼 END ADD */
 
- /**
-  * M-PESA C2B CONFIRMATION
-  * This is called by Safaricom after user enters PIN
-  */
+/**
+ * M-PESA C2B CONFIRMATION
+ * This is called by Safaricom after user enters PIN
+ */
 exports.mpesaConfirmation = async (req, res) => {
+  /* 🔥 VISIBILITY — HANDLER ENTERED (NO LOGIC CHANGE) */
+  console.log("🔥 MPESA CONFIRMATION HANDLER ENTERED");
+
   try {
     const data = req.body;
 
@@ -87,9 +93,7 @@ exports.mpesaConfirmation = async (req, res) => {
           source: "MPESA_C2B"
         });
 
-        console.log(
-          `💰 Wallet credited: ${reference} +${amount}`
-        );
+        console.log(`💰 Wallet credited: ${reference} +${amount}`);
       }
     } catch (walletErr) {
       console.error("❌ Wallet credit error:", walletErr.message);
@@ -113,6 +117,9 @@ exports.mpesaConfirmation = async (req, res) => {
     );
 
     console.log(`✅ AI user upgraded: ${reference} → ${plan}`);
+
+    /* 🔥 VISIBILITY — HANDLER EXIT (NO LOGIC CHANGE) */
+    console.log("🔥 MPESA CONFIRMATION HANDLER COMPLETED");
 
     // 5️⃣ Respond to Safaricom (VERY IMPORTANT)
     res.json({
