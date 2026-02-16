@@ -20,6 +20,18 @@ app.get("/health", (req, res) => {
 });
 /* 🔼 END ADD */
 
+/* ================= RAW C2B VISIBILITY (NO LOGIC) ================= */
+app.use((req, res, next) => {
+  if (req.originalUrl.startsWith("/api/c2b")) {
+    console.log("🔥 INCOMING C2B REQUEST");
+    console.log("METHOD:", req.method);
+    console.log("URL:", req.originalUrl);
+    console.log("HEADERS:", JSON.stringify(req.headers, null, 2));
+    console.log("BODY:", JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
+
 /* ================= ROUTES ================= */
 const paymentsRoutes = require("./routes/payments.routes");
 const walletRoutes   = require("./routes/wallet.routes");
@@ -55,7 +67,7 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Smart Pay running on port ${PORT}`);
+  console.log(\`🚀 Smart Pay running on port \${PORT}\`);
 });
 
 /* ================= DATABASE (NON-BLOCKING) ================= */
