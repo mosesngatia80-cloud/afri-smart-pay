@@ -3,6 +3,9 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const fetch = require("node-fetch");
 
+/* 🔥 VISIBILITY: FILE LOAD (NO LOGIC CHANGE) */
+console.log("🔥 C2B ROUTES FILE LOADED");
+
 /* ===========================
    RAW CALLBACK LOG (AUDIT)
    SMART PAY IS A PAYMENT RAIL
@@ -25,12 +28,8 @@ const C2BLog =
    SAFARICOM → SMART PAY
 =========================== */
 router.post("/confirmation", async (req, res) => {
-
-  /* 🔥 ABSOLUTE VISIBILITY — DO NOT TOUCH */
-  console.log("🔥🔥🔥 RAW C2B CONFIRMATION HIT 🔥🔥🔥");
-  console.log("TIME:", new Date().toISOString());
-  console.log("HEADERS:", JSON.stringify(req.headers));
-  console.log("BODY:", JSON.stringify(req.body));
+  /* 🔥 VISIBILITY: HANDLER ENTRY (NO LOGIC CHANGE) */
+  console.log("🔥🔥 CONFIRMATION HANDLER ENTERED");
 
   const data = req.body || {};
 
@@ -88,10 +87,7 @@ router.post("/confirmation", async (req, res) => {
    SAFARICOM → SMART PAY
 =========================== */
 router.post("/validation", (req, res) => {
-  console.log("🔥🔥🔥 RAW C2B VALIDATION HIT 🔥🔥🔥");
-  console.log("TIME:", new Date().toISOString());
-  console.log("HEADERS:", JSON.stringify(req.headers));
-  console.log("BODY:", JSON.stringify(req.body));
+  console.log("🟡 C2B VALIDATION HIT:", JSON.stringify(req.body));
   res.json({ ResultCode: 0, ResultDesc: "Success" });
 });
 
