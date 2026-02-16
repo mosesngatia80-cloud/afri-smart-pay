@@ -25,6 +25,13 @@ const C2BLog =
    SAFARICOM → SMART PAY
 =========================== */
 router.post("/confirmation", async (req, res) => {
+
+  /* 🔥 ABSOLUTE VISIBILITY — DO NOT TOUCH */
+  console.log("🔥🔥🔥 RAW C2B CONFIRMATION HIT 🔥🔥🔥");
+  console.log("TIME:", new Date().toISOString());
+  console.log("HEADERS:", JSON.stringify(req.headers));
+  console.log("BODY:", JSON.stringify(req.body));
+
   const data = req.body || {};
 
   /* 1️⃣ ALWAYS LOG (PROOF OF CALLBACK) */
@@ -72,7 +79,6 @@ router.post("/confirmation", async (req, res) => {
 
     console.log("🔁 PAYMENT EVENT FORWARDED TO SMART BIZ");
   } catch (err) {
-    // Never affect Safaricom or Smart Pay uptime
     console.error("❌ SMART BIZ FORWARD ERROR:", err.message);
   }
 });
@@ -82,7 +88,10 @@ router.post("/confirmation", async (req, res) => {
    SAFARICOM → SMART PAY
 =========================== */
 router.post("/validation", (req, res) => {
-  console.log("🟡 C2B VALIDATION HIT:", JSON.stringify(req.body));
+  console.log("🔥🔥🔥 RAW C2B VALIDATION HIT 🔥🔥🔥");
+  console.log("TIME:", new Date().toISOString());
+  console.log("HEADERS:", JSON.stringify(req.headers));
+  console.log("BODY:", JSON.stringify(req.body));
   res.json({ ResultCode: 0, ResultDesc: "Success" });
 });
 
